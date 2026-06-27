@@ -193,6 +193,43 @@ pub async fn get_unit(State(s): State<AppState>, Path(id): Path<Uuid>) -> ApiRes
     Ok(Json(unit))
 }
 
+/// Allowed unit status transitions (scope §16). Permissive enough for operator corrections,
+/// but blocks nonsensical jumps — notably anything out of the terminal `scrapped`, and a
+/// `returned` unit must be restocked/inspected before it can be sold or built again. A no-op
+/// (same → same) is always allowed.
+fn transition_allowed(from: UnitStatus, to: UnitStatus) -> bool {
+    use UnitStatus::*;
+    if from == to {
+        return true;
+    }
+    match from {
+        InStock => matches!(
+            to,
+            Reserved
+                | InBuild
+                | Installed
+                | WithCustomer
+                | Shipped
+                | RmaOpen
+                | Defective
+                | Scrapped
+        ),
+        Reserved => matches!(to, InStock | InBuild | Installed | Defective | Scrapped),
+        InBuild => matches!(to, InStock | Reserved | Installed | Defective | Scrapped),
+        Installed => matches!(to, WithCustomer | InStock | RmaOpen | Defective | Scrapped),
+        WithCustomer => matches!(to, RmaOpen | Returned | Shipped),
+        Shipped => matches!(to, WithCustomer | Returned | RmaOpen),
+        RmaOpen => matches!(
+            to,
+            PendingReturn | Returned | Defective | WithCustomer | InStock | Scrapped
+        ),
+        PendingReturn => matches!(to, Returned | RmaOpen | Scrapped),
+        Defective => matches!(to, RmaOpen | Returned | InStock | Scrapped),
+        Returned => matches!(to, InStock | Defective | RmaOpen | Scrapped),
+        Scrapped => false, // terminal
+    }
+}
+
 pub async fn change_status(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
@@ -200,12 +237,22 @@ pub async fn change_status(
 ) -> ApiResult<Json<Unit>> {
     let mut tx = s.db.begin().await?;
 
-    let current: Option<String> =
-        sqlx::query_scalar("SELECT status::text FROM inventory_unit WHERE id = $1 FOR UPDATE")
+    let current: Option<UnitStatus> =
+        sqlx::query_scalar("SELECT status FROM inventory_unit WHERE id = $1 FOR UPDATE")
             .bind(id)
             .fetch_optional(&mut *tx)
             .await?;
     let current = current.ok_or_else(|| ApiError::NotFound("unit not found".into()))?;
+
+    // Guard the state machine: reject illegal jumps (e.g. out of the terminal `scrapped`),
+    // rather than letting any status → any status (audit finding).
+    if !transition_allowed(current, body.status) {
+        return Err(ApiError::BadRequest(format!(
+            "illegal status transition {} -> {}",
+            enum_to_str(&current).unwrap_or_default(),
+            enum_to_str(&body.status).unwrap_or_default()
+        )));
+    }
 
     let sql = format!("UPDATE inventory_unit SET status = $1 WHERE id = $2 RETURNING {UNIT_COLS}");
     let unit = sqlx::query_as::<_, Unit>(&sql)
@@ -214,13 +261,14 @@ pub async fn change_status(
         .fetch_one(&mut *tx)
         .await?;
 
+    let from_status = enum_to_str(&current);
     let to_status = enum_to_str(&unit.status);
     let detail = body.note.map(|n| serde_json::json!({ "note": n }));
     log_unit_event(
         &mut *tx,
         unit.id,
         UnitEventType::StatusChange,
-        Some(current.as_str()),
+        from_status.as_deref(),
         to_status.as_deref(),
         body.actor.as_deref(),
         unit.system_id,

@@ -121,6 +121,19 @@ async fn fetch_system(s: &AppState, id: Uuid) -> ApiResult<System> {
         .ok_or_else(|| ApiError::NotFound("system not found".into()))
 }
 
+/// Lock the system row inside a transaction and return its current state. Every handler that
+/// gates on or mutates `validation_state`/ownership/membership takes this FIRST, so the
+/// check-then-act is atomic and concurrent ops (deliver vs add_member vs sweep) serialize on
+/// the row rather than racing on a stale pre-transaction read (audit: system-gating TOCTOU).
+async fn lock_system(conn: &mut PgConnection, id: Uuid) -> ApiResult<System> {
+    let sql = format!("SELECT {SYSTEM_COLS} FROM system WHERE id = $1 FOR UPDATE");
+    sqlx::query_as::<_, System>(&sql)
+        .bind(id)
+        .fetch_optional(conn)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("system not found".into()))
+}
+
 pub async fn get_system(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
@@ -143,8 +156,8 @@ pub async fn add_member(
     Path(id): Path<Uuid>,
     Json(b): Json<MemberReq>,
 ) -> ApiResult<Json<SystemWithMembers>> {
-    let _ = fetch_system(&s, id).await?;
     let mut tx = s.db.begin().await?;
+    let _ = lock_system(&mut tx, id).await?;
     let updated = sqlx::query("UPDATE inventory_unit SET system_id = $1 WHERE id = $2")
         .bind(id)
         .bind(b.unit_id)
@@ -175,8 +188,8 @@ pub async fn remove_member(
     State(s): State<AppState>,
     Path((id, unit_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<SystemWithMembers>> {
-    let _ = fetch_system(&s, id).await?;
     let mut tx = s.db.begin().await?;
+    let _ = lock_system(&mut tx, id).await?;
     let updated =
         sqlx::query("UPDATE inventory_unit SET system_id = NULL WHERE id = $1 AND system_id = $2")
             .bind(unit_id)
@@ -214,12 +227,13 @@ async fn invalidate(tx: &mut PgConnection, system_id: Uuid) -> Result<(), sqlx::
     Ok(())
 }
 
-/// Snapshot the current member set (unit_id + serial) for a validation record.
-async fn parts_snapshot(s: &AppState, system_id: Uuid) -> Result<Value, sqlx::Error> {
+/// Snapshot the current member set (unit_id + serial) for a validation record. Takes the tx
+/// connection so the snapshot is consistent with the locked system row.
+async fn parts_snapshot(conn: &mut PgConnection, system_id: Uuid) -> Result<Value, sqlx::Error> {
     let rows: Vec<(Uuid, Option<String>)> =
         sqlx::query_as("SELECT id, serial_number FROM inventory_unit WHERE system_id = $1")
             .bind(system_id)
-            .fetch_all(&s.db)
+            .fetch_all(conn)
             .await?;
     Ok(Value::Array(
         rows.into_iter()
@@ -259,10 +273,10 @@ pub async fn validate_system(
     Path(id): Path<Uuid>,
     Json(b): Json<ValidateReq>,
 ) -> ApiResult<Json<ValidationOut>> {
-    let _ = fetch_system(&s, id).await?;
-    let snapshot = parts_snapshot(&s, id).await?;
-
     let mut tx = s.db.begin().await?;
+    let system = lock_system(&mut tx, id).await?;
+    let snapshot = parts_snapshot(&mut tx, id).await?;
+
     let validation_id: Uuid = sqlx::query_scalar(
         "INSERT INTO system_validation \
          (system_id, validation_type, trigger, performed_by, result, parts_snapshot, evidence_refs, notes) \
@@ -299,7 +313,7 @@ pub async fn validate_system(
             invalidate(&mut tx, id).await?;
             ValidationState::Invalidated
         }
-        _ => fetch_system(&s, id).await?.validation_state,
+        _ => system.validation_state,
     };
     tx.commit().await?;
 
@@ -343,7 +357,11 @@ pub async fn deliver_system(
     Path(id): Path<Uuid>,
     Json(b): Json<DeliverReq>,
 ) -> ApiResult<Json<DeliverOut>> {
-    let system = fetch_system(&s, id).await?;
+    let now = Utc::now();
+    let delivery_date = now.date_naive();
+
+    let mut tx = s.db.begin().await?;
+    let system = lock_system(&mut tx, id).await?;
     if !matches!(system.validation_state, ValidationState::Validated) {
         return Err(ApiError::BadRequest(
             "system must be validated before delivery (scope §6.2)".into(),
@@ -359,13 +377,9 @@ pub async fn deliver_system(
          WHERE u.system_id = $1",
     )
     .bind(id)
-    .fetch_all(&s.db)
+    .fetch_all(&mut *tx)
     .await?;
 
-    let now = Utc::now();
-    let delivery_date = now.date_naive();
-
-    let mut tx = s.db.begin().await?;
     sqlx::query(
         "UPDATE system SET current_owner = 'customer', customer_ref = $2, delivery_datetime = $3, \
          status = 'delivered', cec_warranty_class = $4 WHERE id = $1",
@@ -476,11 +490,12 @@ pub async fn sweep_system(
     Path(id): Path<Uuid>,
     Json(b): Json<SweepReq>,
 ) -> ApiResult<Json<SweepOut>> {
-    let _ = fetch_system(&s, id).await?;
+    let mut tx = s.db.begin().await?;
+    let _ = lock_system(&mut tx, id).await?;
     let members: Vec<(Uuid, Option<String>)> =
         sqlx::query_as("SELECT id, serial_number FROM inventory_unit WHERE system_id = $1")
             .bind(id)
-            .fetch_all(&s.db)
+            .fetch_all(&mut *tx)
             .await?;
 
     let scanned: HashSet<&str> = b.scanned_serials.iter().map(|s| s.as_str()).collect();
@@ -515,9 +530,8 @@ pub async fn sweep_system(
     } else {
         ValidationResult::Fail
     };
-    let snapshot = parts_snapshot(&s, id).await?;
+    let snapshot = parts_snapshot(&mut tx, id).await?;
 
-    let mut tx = s.db.begin().await?;
     let validation_id: Uuid = sqlx::query_scalar(
         "INSERT INTO system_validation \
          (system_id, validation_type, trigger, performed_by, result, parts_snapshot, reconciliation) \
@@ -592,7 +606,8 @@ pub async fn transfer_system(
     Path(id): Path<Uuid>,
     Json(b): Json<TransferReq>,
 ) -> ApiResult<Json<TransferOut>> {
-    let system = fetch_system(&s, id).await?;
+    let mut tx = s.db.begin().await?;
+    let system = lock_system(&mut tx, id).await?;
     if !matches!(system.current_owner, OwnerKind::Customer) {
         return Err(ApiError::BadRequest(
             "only a delivered (customer-owned) system can be transferred".into(),
@@ -608,7 +623,7 @@ pub async fn transfer_system(
             )
             .bind(sid)
             .bind(id)
-            .fetch_optional(&s.db)
+            .fetch_optional(&mut *tx)
             .await?;
             matches!(ok, Some((r, t)) if r == "pass" && (t == "sweep" || t == "pre_transfer"))
         }
@@ -627,7 +642,7 @@ pub async fn transfer_system(
          LEFT JOIN manufacturer m ON m.id = p.manufacturer_id WHERE u.system_id = $1",
     )
     .bind(id)
-    .fetch_all(&s.db)
+    .fetch_all(&mut *tx)
     .await?;
     let mfr_outcome = Value::Array(
         parts
@@ -644,7 +659,6 @@ pub async fn transfer_system(
     );
 
     let from_owner_ref = system.customer_ref.clone();
-    let mut tx = s.db.begin().await?;
     sqlx::query("UPDATE system SET customer_ref = $2, status = 'in_service' WHERE id = $1")
         .bind(id)
         .bind(&b.to_owner_ref)

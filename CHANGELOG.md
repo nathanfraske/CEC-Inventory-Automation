@@ -8,6 +8,16 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Security — 2026-06-27 — Audit remediation batch 2: DB-integrity guards
+- **System-gating TOCTOU fixed:** a `lock_system` helper row-locks the `system` (`FOR UPDATE`)
+  as the first statement inside the tx for add/remove member, validate, deliver, sweep, transfer;
+  gate checks re-read the locked state and member/snapshot reads moved inside the tx.
+- **Status-transition matrix:** `units.change_status` rejects illegal jumps (`scrapped` is
+  terminal, `returned` must be restocked/inspected first, …); `rma.update_rma` refuses to move a
+  terminal `closed` case.
+- **`/export` completeness:** added `vendor_return_policy`, `cec_warranty_policy`, `trade_in`,
+  `trade_in_unit`; `app_user` deliberately excluded (credentials).
+
 ### Security — 2026-06-27 — Audit remediation batch 1: integrity constraints (migration 0003)
 - **Serial numbers are globally unique** (D-017): partial unique index on
   `inventory_unit.serial_number WHERE serial_number IS NOT NULL`; duplicate bind/intake → 409.

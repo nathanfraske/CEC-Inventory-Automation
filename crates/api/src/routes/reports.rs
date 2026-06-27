@@ -70,11 +70,15 @@ async fn dump(s: &AppState, table: &str) -> Result<Vec<Value>, sqlx::Error> {
         .await
 }
 
-/// Full inventory export as JSON (scope §18) — a portable, no-lock-in snapshot.
+/// Full inventory export as JSON (scope §18) — a portable, no-lock-in snapshot of every
+/// business table. `app_user` is deliberately excluded: it holds credentials (password hashes),
+/// which must not ride in a portability export. Pair with `pg_dump` + the object-store archive
+/// for an authoritative backup (the receipt files are not inlined here).
 pub async fn export_json(State(s): State<AppState>) -> ApiResult<Json<Value>> {
     Ok(Json(json!({
         "exported_at": Utc::now(),
         "vendors": dump(&s, "vendor").await?,
+        "vendor_return_policies": dump(&s, "vendor_return_policy").await?,
         "manufacturers": dump(&s, "manufacturer").await?,
         "products": dump(&s, "product").await?,
         "purchases": dump(&s, "purchase").await?,
@@ -86,7 +90,10 @@ pub async fn export_json(State(s): State<AppState>) -> ApiResult<Json<Value>> {
         "systems": dump(&s, "system").await?,
         "system_validations": dump(&s, "system_validation").await?,
         "system_transfers": dump(&s, "system_transfer").await?,
+        "cec_warranty_policies": dump(&s, "cec_warranty_policy").await?,
         "rma_cases": dump(&s, "rma_case").await?,
+        "trade_ins": dump(&s, "trade_in").await?,
+        "trade_in_units": dump(&s, "trade_in_unit").await?,
         "unit_events": dump(&s, "unit_event").await?,
     })))
 }

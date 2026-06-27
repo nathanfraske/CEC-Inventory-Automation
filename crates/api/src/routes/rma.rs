@@ -213,6 +213,12 @@ pub async fn update_rma(
             .bind(id)
             .fetch_one(&mut *tx)
             .await?;
+    // `closed` is terminal: don't allow moving a closed case to a different status.
+    if prior_status == "closed" && !closed && b.status.is_some() {
+        return Err(ApiError::BadRequest(
+            "RMA case is closed (terminal); cannot change its status".into(),
+        ));
+    }
     let sql = format!(
         "UPDATE rma_case SET status = COALESCE($2, status), custody = COALESCE($3, custody), \
          rma_number = COALESCE($4, rma_number), return_tracking = COALESCE($5, return_tracking), \
