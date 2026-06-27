@@ -9,6 +9,7 @@ use axum::{
 use crate::AppState;
 
 pub mod catalog;
+pub mod direct;
 pub mod intake;
 pub mod purchases;
 pub mod rma;
@@ -85,6 +86,10 @@ pub fn router() -> Router<AppState> {
         .route("/systems/{id}/deliver", post(systems::deliver_system))
         .route("/systems/{id}/sweep", post(systems::sweep_system))
         .route("/systems/{id}/transfer", post(systems::transfer_system))
+        // cec.direct seam
+        .route("/availability", get(direct::availability))
+        .route("/units/{id}/reserve", post(direct::reserve_unit))
+        .route("/units/{id}/consume", post(direct::consume_unit))
         // RMA lifecycle
         .route("/units/{id}/rma", post(rma::open_rma))
         .route("/rma", get(rma::list_rma))

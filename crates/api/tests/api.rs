@@ -917,3 +917,89 @@ async fn phase3_rma_lifecycle_and_replacement() {
     assert_eq!(cc["status"], "replacement_received");
     assert_eq!(cc["replacement_unit_id"], new_unit);
 }
+
+#[tokio::test]
+async fn phase5_direct_reserve_consume() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+    let product: Value = c
+        .post(format!("{base}/products"))
+        .json(&json!({ "model": "RAM Kit", "category": "memory" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let product_id = product["id"].as_str().unwrap().to_string();
+    let unit: Value = c
+        .post(format!("{base}/units"))
+        .json(&json!({ "product_id": product_id, "serial_number": "RAM-1" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let unit_id = unit["id"].as_str().unwrap().to_string();
+    let system: Value = c
+        .post(format!("{base}/systems"))
+        .json(&json!({ "label": "BUILD-DIRECT", "build_id": uuid::Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let system_id = system["id"].as_str().unwrap().to_string();
+
+    // Reserve in_stock → reserved.
+    let r = c
+        .post(format!("{base}/units/{unit_id}/reserve"))
+        .send()
+        .await
+        .unwrap();
+    assert!(r.status().is_success());
+
+    // Consume reserved → installed, attached to the system.
+    let cons: Value = c
+        .post(format!("{base}/units/{unit_id}/consume"))
+        .json(&json!({ "system_id": system_id }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(cons["status"], "installed");
+    let u: Value = c
+        .get(format!("{base}/units/{unit_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(u["status"], "installed");
+    assert_eq!(u["system_id"], system_id);
+
+    // Reserving a non-in-stock unit is rejected.
+    let bad = c
+        .post(format!("{base}/units/{unit_id}/reserve"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 400);
+
+    // Availability read returns serialized + bulk arrays.
+    let avail: Value = c
+        .get(format!("{base}/availability"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(avail["serialized"].is_array());
+    assert!(avail["bulk"].is_array());
+}

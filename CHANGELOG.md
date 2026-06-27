@@ -9,6 +9,10 @@ dating + tombstoning conventions that govern the memory documents.
 ## [Unreleased]
 
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- cec.direct seam (scope §19): `GET /availability` (in-stock serialized per product + bulk
+  qty), `POST /units/{id}/reserve` (in_stock→reserved) and `POST /units/{id}/consume`
+  (reserved/in_stock→installed, attach to a System whose build_id references the build),
+  guarded transitions, event-logged.
 - RMA lifecycle (scope §7): `POST /units/{id}/rma` opens a case (derives execution mode /
   proof source / custody from ownership), `GET/PATCH /rma/{id}`, `GET /rma`,
   `POST /rma/{id}/proof-package` (bundles receipt + serial + warranty terms, stored on the
