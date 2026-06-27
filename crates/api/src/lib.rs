@@ -58,7 +58,11 @@ pub async fn build_state() -> anyhow::Result<AppState> {
         .max_connections(10)
         .connect(&database_url)
         .await?;
-    // migrations/ lives at the repo root, two levels above this crate.
+    // migrations/ lives at the repo root, two levels above this crate. NOTE: `sqlx::migrate!`
+    // embeds the migration files at COMPILE time and does not reliably re-embed when a new
+    // migration is added on stable Rust — touch this file (or `cargo clean -p cec-inventory-api`)
+    // so the macro re-reads the directory. Current set: 0001 init, 0002 app_user,
+    // 0003 integrity_hardening (serial/asset-tag uniqueness + append-only triggers).
     sqlx::migrate!("../../migrations").run(&db).await?;
 
     // Cookie signing key from SESSION_SECRET. Fail closed (like DATABASE_URL): no baked-in

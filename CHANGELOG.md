@@ -8,6 +8,15 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Security — 2026-06-27 — Audit remediation batch 1: integrity constraints (migration 0003)
+- **Serial numbers are globally unique** (D-017): partial unique index on
+  `inventory_unit.serial_number WHERE serial_number IS NOT NULL`; duplicate bind/intake → 409.
+- **Bulk-stock asset tags are unique** (`stock_item.asset_tag`); units/systems already were.
+- **Append-only enforced at the DB:** a `BEFORE UPDATE OR DELETE` trigger on `unit_event`,
+  `system_validation`, `system_transfer`, `shipment_event` raises on any history mutation.
+- Integration tests use unique-per-run serials; a `serial_number_globally_unique` test asserts
+  the 409 (and that NULL serials remain exempt).
+
 ### Security — 2026-06-27 — Audit-panel remediation (see docs/AUDIT-2026-06-27.md)
 Two parallel reviewer panels (security + data-integrity/backups) ran over the whole system.
 Fixed this pass:

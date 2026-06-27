@@ -4,6 +4,13 @@
 
 use serde_json::{json, Value};
 
+/// Unique-per-run serial. `inventory_unit.serial_number` is globally unique (migration 0003),
+/// so fixed serials would collide on a re-run against a persistent dev DB; this keeps tests
+/// idempotent. (CI runs against a fresh DB regardless.)
+fn sn(prefix: &str) -> String {
+    format!("{prefix}-{}", uuid::Uuid::new_v4().simple())
+}
+
 async fn spawn() -> Option<String> {
     if std::env::var("DATABASE_URL").is_err() {
         eprintln!("skipping integration test: DATABASE_URL not set");
@@ -139,7 +146,7 @@ async fn phase0_crud_and_event_log_flow() {
         .json(&json!({
             "product_id": product_id,
             "line_item_id": line_item_id,
-            "serial_number": "GPU-2291X",
+            "serial_number": sn("GPU-2291X"),
             "serial_source": "scan",
             "condition": "new",
             "intake_by": "tester"
@@ -273,7 +280,7 @@ async fn phase1_landed_cost_and_shipment_tracking() {
     // A unit bound to line 1 should receive the per-unit landed cost on allocation.
     let unit: Value = c
         .post(format!("{base}/units"))
-        .json(&json!({ "product_id": product_id, "line_item_id": line1, "serial_number": "PSU-1" }))
+        .json(&json!({ "product_id": product_id, "line_item_id": line1, "serial_number": sn("PSU-1") }))
         .send()
         .await
         .unwrap()
@@ -437,7 +444,7 @@ async fn phase3_warranty_recompute_and_readiness() {
 
     let unit: Value = c
         .post(format!("{base}/units"))
-        .json(&json!({ "product_id": product_id, "line_item_id": line_id, "serial_number": "GPU-W1" }))
+        .json(&json!({ "product_id": product_id, "line_item_id": line_id, "serial_number": sn("GPU-W1") }))
         .send()
         .await
         .unwrap()
@@ -505,7 +512,7 @@ async fn phase2_trade_in_and_opening_balance() {
         .json(&json!({
             "customer_ref": "cust-1",
             "proof_of_purchase_status": "customer_lacks",
-            "units": [{ "product_id": product_id, "serial_number": "SSD-T1", "condition": "used" }]
+            "units": [{ "product_id": product_id, "serial_number": sn("SSD-T1"), "condition": "used" }]
         }))
         .send()
         .await
@@ -532,7 +539,7 @@ async fn phase2_trade_in_and_opening_balance() {
         .post(format!("{base}/opening-balance"))
         .json(&json!({
             "origin_known": false,
-            "units": [{ "product_id": product_id, "serial_number": "SSD-OB1" }]
+            "units": [{ "product_id": product_id, "serial_number": sn("SSD-OB1") }]
         }))
         .send()
         .await
@@ -589,7 +596,7 @@ async fn phase3_systems_delivery_starts_cec_clock() {
     let product_id = product["id"].as_str().unwrap().to_string();
     let unit: Value = c
         .post(format!("{base}/units"))
-        .json(&json!({ "product_id": product_id, "serial_number": "BRD-1" }))
+        .json(&json!({ "product_id": product_id, "serial_number": sn("BRD-1") }))
         .send()
         .await
         .unwrap()
@@ -698,9 +705,10 @@ async fn phase4_parts_sweep_and_transfer() {
         .await
         .unwrap();
     let product_id = product["id"].as_str().unwrap().to_string();
+    let serial = sn("SW-1");
     let unit: Value = c
         .post(format!("{base}/units"))
-        .json(&json!({ "product_id": product_id, "serial_number": "SW-1" }))
+        .json(&json!({ "product_id": product_id, "serial_number": serial.clone() }))
         .send()
         .await
         .unwrap()
@@ -757,7 +765,7 @@ async fn phase4_parts_sweep_and_transfer() {
     // Clean sweep → validated; transfer authorized by the sweep.
     let good: Value = c
         .post(format!("{base}/systems/{sid}/sweep"))
-        .json(&json!({ "scanned_serials": ["SW-1"], "performed_by": "bench" }))
+        .json(&json!({ "scanned_serials": [serial.clone()], "performed_by": "bench" }))
         .send()
         .await
         .unwrap()
@@ -844,9 +852,10 @@ async fn phase3_rma_lifecycle_and_replacement() {
         .as_str()
         .unwrap()
         .to_string();
+    let serial = sn("PSU-RMA-1");
     let unit: Value = c
         .post(format!("{base}/units"))
-        .json(&json!({ "product_id": product_id, "line_item_id": line_id, "serial_number": "PSU-RMA-1" }))
+        .json(&json!({ "product_id": product_id, "line_item_id": line_id, "serial_number": serial.clone() }))
         .send()
         .await
         .unwrap()
@@ -888,13 +897,13 @@ async fn phase3_rma_lifecycle_and_replacement() {
         .json()
         .await
         .unwrap();
-    assert_eq!(pkg["serial_number"], "PSU-RMA-1");
+    assert_eq!(pkg["serial_number"], serial);
     assert_eq!(pkg["product"]["manufacturer"], "Corsair");
 
     // Refurbished replacement intake.
     let rep: Value = c
         .post(format!("{base}/rma/{case_id}/replacement"))
-        .json(&json!({ "serial_number": "PSU-RMA-2", "refurbished": true }))
+        .json(&json!({ "serial_number": sn("PSU-RMA-2"), "refurbished": true }))
         .send()
         .await
         .unwrap()
@@ -952,7 +961,7 @@ async fn phase5_direct_reserve_consume() {
     let product_id = product["id"].as_str().unwrap().to_string();
     let unit: Value = c
         .post(format!("{base}/units"))
-        .json(&json!({ "product_id": product_id, "serial_number": "RAM-1" }))
+        .json(&json!({ "product_id": product_id, "serial_number": sn("RAM-1") }))
         .send()
         .await
         .unwrap()
@@ -1417,7 +1426,7 @@ async fn ui_pages_render() {
     let pid = prod["id"].as_str().unwrap();
     let unit: Value = c
         .post(format!("{base}/units"))
-        .json(&json!({ "product_id": pid, "serial_number": "UIDET-1" }))
+        .json(&json!({ "product_id": pid, "serial_number": sn("UIDET-1") }))
         .send()
         .await
         .unwrap()
@@ -1594,6 +1603,52 @@ async fn from_payload_persists_supplied_extraction() {
         .await
         .unwrap();
     assert_eq!(bad.status(), 400);
+}
+
+// Serial numbers are globally unique (migration 0003): a second unit with the same serial is
+// rejected with 409 (the central unique-violation mapping), not silently duplicated.
+#[tokio::test]
+async fn serial_number_globally_unique() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+    let product: Value = c
+        .post(format!("{base}/products"))
+        .json(&json!({ "model": "Unique-Serial Probe" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pid = product["id"].as_str().unwrap();
+    let serial = sn("DUP");
+
+    let first = c
+        .post(format!("{base}/units"))
+        .json(&json!({ "product_id": pid, "serial_number": serial.clone() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 201);
+
+    let dup = c
+        .post(format!("{base}/units"))
+        .json(&json!({ "product_id": pid, "serial_number": serial.clone() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(dup.status(), 409, "duplicate serial must conflict");
+
+    // A NULL serial is exempt from the partial unique index — two are fine.
+    for _ in 0..2 {
+        let r = c
+            .post(format!("{base}/units"))
+            .json(&json!({ "product_id": pid }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 201, "null-serial units are allowed");
+    }
 }
 
 #[tokio::test]
