@@ -64,10 +64,14 @@ async fn transition(
     system_id: Option<Uuid>,
     actor: Option<&str>,
 ) -> ApiResult<()> {
+    // Lock the row INSIDE the transaction so the read-check-write is atomic: taking
+    // `FOR UPDATE` on the pool would release the lock before the write, letting two
+    // concurrent reserve/consume calls both pass the guard (double-reserve / lost update).
+    let mut tx = s.db.begin().await?;
     let current: Option<String> =
         sqlx::query_scalar("SELECT status::text FROM inventory_unit WHERE id = $1 FOR UPDATE")
             .bind(unit_id)
-            .fetch_optional(&s.db)
+            .fetch_optional(&mut *tx)
             .await?;
     let current = current.ok_or_else(|| ApiError::NotFound("unit not found".into()))?;
     if !allowed_from.contains(&current.as_str()) {
@@ -76,7 +80,6 @@ async fn transition(
         )));
     }
 
-    let mut tx = s.db.begin().await?;
     sqlx::query("UPDATE inventory_unit SET status = $2::unit_status, system_id = COALESCE($3, system_id) WHERE id = $1")
         .bind(unit_id)
         .bind(to)

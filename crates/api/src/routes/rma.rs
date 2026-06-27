@@ -203,6 +203,16 @@ pub async fn update_rma(
 ) -> ApiResult<Json<RmaCase>> {
     let case = fetch_case(&s, id).await?;
     let closed = matches!(b.status, Some(RmaStatus::Closed));
+
+    // The case UPDATE and its event must be one atomic unit (else the status can change with
+    // no `rma_update` event — a provenance gap, scope §16). Lock + read the prior status
+    // inside the tx so `from_value` is accurate under concurrent updates.
+    let mut tx = s.db.begin().await?;
+    let prior_status: String =
+        sqlx::query_scalar("SELECT status::text FROM rma_case WHERE id = $1 FOR UPDATE")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
     let sql = format!(
         "UPDATE rma_case SET status = COALESCE($2, status), custody = COALESCE($3, custody), \
          rma_number = COALESCE($4, rma_number), return_tracking = COALESCE($5, return_tracking), \
@@ -218,21 +228,27 @@ pub async fn update_rma(
         .bind(b.resolution.as_deref())
         .bind(b.auth_hold_ref.as_deref())
         .bind(closed)
-        .fetch_one(&s.db)
+        .fetch_one(&mut *tx)
         .await?;
+    let to_val = if b.status.is_some() {
+        serde_json::to_value(updated.status)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+    } else {
+        None
+    };
     log_unit_event(
-        &s.db,
+        &mut *tx,
         case.unit_id,
         UnitEventType::RmaUpdate,
-        Some(&serde_json::to_value(case.status).unwrap().to_string()),
-        b.status
-            .map(|_| serde_json::to_value(updated.status).unwrap().to_string())
-            .as_deref(),
+        Some(&prior_status),
+        to_val.as_deref(),
         b.actor.as_deref(),
         None,
         Some(json!({ "rma_case_id": id })),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(updated))
 }
 

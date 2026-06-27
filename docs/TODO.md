@@ -50,6 +50,19 @@
 - [ ] **[2026-06-27]** Wire a real carrier provider (USPS/UPS/FedEx/DHL direct, or an
   aggregator) behind the `CarrierProvider` trait; today only `none`/`mock` exist (INV-OQ-30).
 
+## Open — audit remediation backlog (panels ran 2026-06-27; full list in docs/AUDIT-2026-06-27.md)
+
+- ◐ PARTIAL **[2026-06-27]** Audit panels (security + data-integrity/backups). DONE this pass:
+  object-store backup (Critical), `SESSION_SECRET` fail-closed, body-size limits,
+  reserve/consume + rma_update/unit_label transactional fixes, regex size limit, extraction
+  validation, password floor 12, constant-time login. OUTSTANDING (prioritized in the audit doc):
+  login rate-limiting; session expiry/revocation; RBAC + server-derived actor; **serial-number
+  uniqueness (owner decision needed)**; append-only DB enforcement (trigger/role); system-gating
+  TOCTOU locks; status-transition matrix; `/export` completeness; asset-tag uniqueness; backup
+  automation/encryption/offsite + restore drill + WAL/PITR; non-root containers + resource
+  limits; `cargo audit`/`pip-audit`/dependabot + image-digest pinning; vision egress audit
+  log/size cap.
+
 ## Open — hardening follow-ups (backend for Phases 1–5 is done; see HANDOFF [2026-06-27])
 
 - ◐ PARTIAL **[2026-06-27]** SQLx hardening (D-010). DONE: a CI `tests` job runs the full

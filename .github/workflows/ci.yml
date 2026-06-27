@@ -49,6 +49,9 @@ jobs:
           --health-interval 5s --health-timeout 3s --health-retries 12
     env:
       DATABASE_URL: postgres://cec:cec@localhost:5432/cec_inventory
+      # build_state() now requires SESSION_SECRET (≥64 bytes) and fails closed — supply a
+      # throwaway CI value (not a real secret; the auth test only needs a valid signing key).
+      SESSION_SECRET: ci-only-throwaway-session-secret-not-used-in-production-0123456789
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

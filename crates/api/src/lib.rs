@@ -9,7 +9,7 @@
 
 use std::{path::PathBuf, sync::Arc};
 
-use axum::extract::FromRef;
+use axum::extract::{DefaultBodyLimit, FromRef};
 use axum::{
     routing::{get, post},
     Json, Router,
@@ -61,14 +61,16 @@ pub async fn build_state() -> anyhow::Result<AppState> {
     // migrations/ lives at the repo root, two levels above this crate.
     sqlx::migrate!("../../migrations").run(&db).await?;
 
-    // Derive the cookie signing key from SESSION_SECRET (≥64 bytes; pad short dev secrets).
-    let mut secret = std::env::var("SESSION_SECRET")
-        .unwrap_or_else(|_| "dev-insecure-session-secret-change-me".to_string())
-        .into_bytes();
+    // Cookie signing key from SESSION_SECRET. Fail closed (like DATABASE_URL): no baked-in
+    // default key, and no zero-padding of short secrets (which would shrink the keyspace and,
+    // with the old hardcoded default, allowed anyone to forge sessions). Require ≥64 bytes —
+    // `scripts/gen_secrets.sh` writes a 64-hex-char value.
+    let secret = std::env::var("SESSION_SECRET")
+        .expect("SESSION_SECRET must be set (run scripts/gen_secrets.sh; never commit it)");
     if secret.len() < 64 {
-        secret.resize(64, 0);
+        panic!("SESSION_SECRET must be at least 64 bytes (run scripts/gen_secrets.sh)");
     }
-    let cookie_key = Key::from(&secret);
+    let cookie_key = Key::from(secret.as_bytes());
 
     Ok(AppState {
         db,
@@ -100,7 +102,12 @@ pub fn build_app(state: AppState, require_auth: bool) -> Router {
         .merge(routes::ui_router())
         .merge(auth::router());
 
-    public.merge(protected).with_state(state)
+    // Global 1 MiB body cap (DoS guard) for JSON/form routes. The receipt/image upload routes
+    // raise this per-route in routes::router() (photos exceed 1 MiB); the inner route limit wins.
+    public
+        .merge(protected)
+        .layer(DefaultBodyLimit::max(1024 * 1024))
+        .with_state(state)
 }
 
 /// Connect, build the router, and serve. The binary entry point calls this.

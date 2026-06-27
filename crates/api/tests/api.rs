@@ -1623,7 +1623,7 @@ async fn auth_bootstrap_login_protect_logout() {
     // Bootstrap the first operator.
     let boot = anon
         .post(format!("{base}/auth/bootstrap"))
-        .json(&json!({ "username": "op1", "password": "supersecret" }))
+        .json(&json!({ "username": "op1", "password": "supersecret-12" }))
         .send()
         .await
         .unwrap();
@@ -1632,7 +1632,7 @@ async fn auth_bootstrap_login_protect_logout() {
     // A second bootstrap is refused.
     let boot2 = anon
         .post(format!("{base}/auth/bootstrap"))
-        .json(&json!({ "username": "op2", "password": "supersecret" }))
+        .json(&json!({ "username": "op2", "password": "supersecret-12" }))
         .send()
         .await
         .unwrap();
@@ -1654,7 +1654,7 @@ async fn auth_bootstrap_login_protect_logout() {
         .unwrap();
     let login = c
         .post(format!("{base}/auth/login"))
-        .json(&json!({ "username": "op1", "password": "supersecret" }))
+        .json(&json!({ "username": "op1", "password": "supersecret-12" }))
         .send()
         .await
         .unwrap();

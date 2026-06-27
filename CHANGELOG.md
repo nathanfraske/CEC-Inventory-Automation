@@ -8,6 +8,28 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Security — 2026-06-27 — Audit-panel remediation (see docs/AUDIT-2026-06-27.md)
+Two parallel reviewer panels (security + data-integrity/backups) ran over the whole system.
+Fixed this pass:
+- **Backups (Critical):** `db_backup.sh` now archives the receipt/photo object store alongside
+  the Postgres dump (timestamp-paired), validates the dump, and uses `set -euo pipefail`;
+  `db_restore.sh` restores the paired objects archive. Previously only Postgres was dumped, so a
+  restore left dangling receipt references (the legal RMA proof artifacts).
+- **Auth/secret (High):** `SESSION_SECRET` now fails closed (no committed dev-default, no
+  zero-padding; requires ≥64 bytes) — the old fallback was a known, forgeable signing key.
+- **DoS (High):** global 1 MiB request body cap + 25 MiB on the upload routes (also fixes the
+  2 MiB-default rejecting real receipt photos).
+- **Concurrency/atomicity (High):** `direct.rs` reserve/consume now locks inside the tx (was a
+  no-op lock → double-reserve race); `update_rma` and `unit_label` wrap mutation + event log in
+  one transaction (were two autocommits).
+- **Input hardening (High/Med/Low):** operator `serial_format_regex` compiled with a size limit;
+  `persist_extraction` validates/caps line items + payload size; `from-image` whitelists media
+  type and caps text fields; password floor 8→12; constant-time login for unknown users.
+
+Open backlog (rate-limiting, session expiry/revocation, RBAC, serial uniqueness, append-only DB
+enforcement, backup automation/encryption, non-root containers, dep-advisory scanning, …) is
+tracked in `docs/AUDIT-2026-06-27.md` and `docs/TODO.md`.
+
 ### Added — 2026-06-27 — Interim image-vision receipt path (scope §11.2)
 - Receipt **images** can now be extracted without the local GPU VLM. New `vision.py` backend
   selected by `EXTRACTOR_VLM_BACKEND`: `stub` (default, hermetic) or `claude` — POSTs the image

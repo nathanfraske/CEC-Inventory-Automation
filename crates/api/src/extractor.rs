@@ -140,6 +140,11 @@ fn default_source() -> SourceType {
 /// (scope §3: receipt → auto-populated line items, operator confirms). Lines come back
 /// `resolution_status = unresolved` for the operator to map to products and scan into units.
 /// The full payload is stored on `purchase.raw_extract`. Shared by every `from-*` handler.
+/// Caps to keep a poisoned/abusive extraction payload (from the VLM or a `from-payload` caller)
+/// from bloating a row or pinning a DB connection.
+const MAX_LINE_ITEMS: usize = 1000;
+const MAX_RAW_EXTRACT_BYTES: usize = 256 * 1024;
+
 pub async fn persist_extraction(
     db: &PgPool,
     extraction: &Value,
@@ -147,6 +152,38 @@ pub async fn persist_extraction(
     created_by: Option<&str>,
     source_type: SourceType,
 ) -> ApiResult<Value> {
+    // Bound the stored payload size (it lands in the `raw_extract` jsonb column).
+    if serde_json::to_vec(extraction).map(|v| v.len()).unwrap_or(0) > MAX_RAW_EXTRACT_BYTES {
+        return Err(ApiError::BadRequest(format!(
+            "extraction payload too large (max {MAX_RAW_EXTRACT_BYTES} bytes)"
+        )));
+    }
+    // Validate line items up front (model/caller-supplied — never trust quantities/money).
+    let empty = vec![];
+    let lines = extraction
+        .get("line_items")
+        .and_then(|x| x.as_array())
+        .unwrap_or(&empty);
+    if lines.len() > MAX_LINE_ITEMS {
+        return Err(ApiError::BadRequest(format!(
+            "too many line items ({}); max {MAX_LINE_ITEMS}",
+            lines.len()
+        )));
+    }
+    for li in lines {
+        let qty = li.get("quantity").and_then(|x| x.as_i64()).unwrap_or(1);
+        if !(1..=1_000_000).contains(&qty) {
+            return Err(ApiError::BadRequest(format!(
+                "invalid line quantity: {qty} (must be 1..=1000000)"
+            )));
+        }
+        for k in ["unit_price", "line_total"] {
+            if money(li, k).map(|d| d.is_sign_negative()).unwrap_or(false) {
+                return Err(ApiError::BadRequest(format!("line {k} cannot be negative")));
+            }
+        }
+    }
+
     let confidence = extraction
         .get("field_confidence")
         .and_then(|c| c.get("total"))
@@ -181,11 +218,6 @@ pub async fn persist_extraction(
     .fetch_one(&mut *tx)
     .await?;
 
-    let empty = vec![];
-    let lines = extraction
-        .get("line_items")
-        .and_then(|x| x.as_array())
-        .unwrap_or(&empty);
     let mut line_item_ids = Vec::new();
     for li in lines {
         let id: Uuid = sqlx::query_scalar(
@@ -273,6 +305,16 @@ pub async fn create_from_image(
     if bytes.is_empty() {
         return Err(ApiError::BadRequest("uploaded image is empty".into()));
     }
+    // Whitelist the media type forwarded to the vision backend; default unknown to jpeg.
+    const ALLOWED: &[&str] = &["image/jpeg", "image/png", "image/webp", "image/gif"];
+    let media_type = if ALLOWED.contains(&media_type.as_str()) {
+        media_type
+    } else {
+        "image/jpeg".to_string()
+    };
+    // Cap free-text fields that flow into the prompt / persisted vendor / event actor.
+    let vendor_hint = vendor_hint.map(|v| v.chars().take(200).collect::<String>());
+    let created_by = created_by.map(|v| v.chars().take(200).collect::<String>());
 
     let extraction = extract_image(&bytes, &media_type, vendor_hint.as_deref()).await?;
     let summary = persist_extraction(

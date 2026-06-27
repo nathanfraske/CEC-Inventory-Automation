@@ -2,11 +2,15 @@
 //! line items and receipt upload, serialized units with event logging, and bulk stock.
 
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{get, patch, post},
     Router,
 };
 
 use crate::AppState;
+
+/// Body cap for the image/receipt upload routes (photos exceed the global 1 MiB JSON cap).
+const UPLOAD_BODY_LIMIT: usize = 25 * 1024 * 1024;
 
 pub mod catalog;
 pub mod direct;
@@ -46,7 +50,10 @@ pub fn router() -> Router<AppState> {
         )
         .route("/purchases/{id}", get(purchases::get_purchase))
         .route("/purchases/{id}/line-items", post(purchases::add_line_item))
-        .route("/purchases/{id}/receipt", post(purchases::upload_receipt))
+        .route(
+            "/purchases/{id}/receipt",
+            post(purchases::upload_receipt).layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
+        )
         .route(
             "/purchases/{id}/allocate-costs",
             post(crate::costing::allocate_costs),
@@ -131,7 +138,8 @@ pub fn router() -> Router<AppState> {
         // receipt image → draft purchase via the vision backend (interim VLM path, scope §11.2)
         .route(
             "/purchases/from-image",
-            post(crate::extractor::create_from_image),
+            post(crate::extractor::create_from_image)
+                .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
         )
         // persist a caller-supplied §11.4 payload (external/operator vision pass)
         .route(

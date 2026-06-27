@@ -45,6 +45,13 @@ fn verify_password(pw: &str, hash: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// A valid argon2 PHC hash computed once, used to equalize timing on the unknown-user login
+/// path (so a missing username costs the same argon2 work as a wrong password).
+fn dummy_hash() -> &'static str {
+    static H: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    H.get_or_init(|| hash_password("timing-equalizer-not-a-credential").unwrap_or_default())
+}
+
 fn session_cookie(user_id: Uuid) -> Cookie<'static> {
     Cookie::build((SESSION_COOKIE, user_id.to_string()))
         .path("/")
@@ -60,9 +67,9 @@ pub async fn bootstrap(
     State(s): State<AppState>,
     Json(c): Json<Credentials>,
 ) -> ApiResult<Json<Value>> {
-    if c.username.trim().is_empty() || c.password.len() < 8 {
+    if c.username.trim().is_empty() || c.password.len() < 12 {
         return Err(ApiError::BadRequest(
-            "username required and password must be at least 8 chars".into(),
+            "username required and password must be at least 12 chars".into(),
         ));
     }
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM app_user")
@@ -87,9 +94,9 @@ pub async fn create_user(
     State(s): State<AppState>,
     Json(c): Json<Credentials>,
 ) -> ApiResult<Json<Value>> {
-    if c.username.trim().is_empty() || c.password.len() < 8 {
+    if c.username.trim().is_empty() || c.password.len() < 12 {
         return Err(ApiError::BadRequest(
-            "username required and password must be at least 8 chars".into(),
+            "username required and password must be at least 12 chars".into(),
         ));
     }
     let hash = hash_password(&c.password)?;
@@ -111,7 +118,15 @@ pub async fn login(
             .bind(&c.username)
             .fetch_optional(&s.db)
             .await?;
-    let (id, hash) = row.ok_or_else(|| ApiError::Unauthorized("invalid credentials".into()))?;
+    let (id, hash) = match row {
+        Some(r) => r,
+        None => {
+            // Verify against a fixed dummy hash so the unknown-user path costs the same as a
+            // wrong-password path (no timing-based username enumeration).
+            verify_password(&c.password, dummy_hash());
+            return Err(ApiError::Unauthorized("invalid credentials".into()));
+        }
+    };
     if !verify_password(&c.password, &hash) {
         return Err(ApiError::Unauthorized("invalid credentials".into()));
     }

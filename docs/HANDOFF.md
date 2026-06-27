@@ -6,6 +6,50 @@
 
 ---
 
+## Entry [2026-06-27] — Security + data-integrity/backups audit panels + remediation (agent: claude/runbook-setup-config-oxwath)
+
+Ran two parallel reviewer panels (3 security lenses: secrets/auth/session, injection/input,
+infra/supply-chain; 2 data lenses: schema/transactions, backups/DR) over the whole system,
+including the new vision code. Full report + prioritized backlog: **`docs/AUDIT-2026-06-27.md`**.
+
+### Fixed this pass (one verified commit)
+- **[CRITICAL] Object store now backed up.** `db_backup.sh` archives `STORAGE_FS_ROOT`
+  timestamp-paired with the pg_dump (+ dump validation, `set -euo pipefail`); `db_restore.sh`
+  restores the paired objects archive. Receipts (RMA legal proof) are no longer lost on restore.
+- **[HIGH] `SESSION_SECRET` fails closed** — removed the committed dev-default + zero-padding
+  (a forgeable known key); requires ≥64 bytes. CI `tests` job supplies a throwaway value.
+- **[HIGH] Body-size limits** — global 1 MiB + 25 MiB on upload routes (also fixes the
+  2 MiB-default rejecting real photos).
+- **[HIGH] Concurrency/atomicity** — `direct.rs` reserve/consume locks inside the tx (was a
+  released-lock double-reserve race); `rma.rs::update_rma` + `scan.rs::unit_label` now do
+  mutation + event in one tx.
+- **[HIGH] Operator regex** compiled with a size limit; **extraction line items validated** +
+  payload/count caps; **from-image** media-type whitelist + field caps; **password floor 8→12**;
+  **constant-time login** for unknown users.
+
+### Verification
+`fmt`/`clippy -D warnings` clean; `cargo test --workspace` → 10 unit + 16 integration green
+(auth test password bumped to ≥12; tests source the 64-char `SESSION_SECRET` from `.env`);
+python extractor + vision tests green; backup scripts `bash -n` clean.
+
+### Owner decision blocking one HIGH fix
+**Serial-number uniqueness semantics** — globally unique? per-product? refurb reuse allowed?
+Needed before adding the unique index + 409 path. Raised in chat.
+
+### Open backlog
+Rate-limiting, session expiry/revocation, RBAC, append-only DB enforcement, system-gating TOCTOU
+locks, status-transition matrix, `/export` completeness, asset-tag uniqueness, backup
+automation/encryption/offsite + restore drill + WAL/PITR, non-root containers + resource limits,
+`cargo audit`/`pip-audit`/dependabot + image-digest pinning, vision egress audit log. See
+`docs/AUDIT-2026-06-27.md` and `docs/TODO.md`.
+
+### Also fixed this session: CI compose regression
+The vision commit broke the CI `compose` job (the extractor Dockerfile didn't copy the new
+`vision.py`, so the container crashed on import → healthcheck timeout). Fixed in a focused commit
+(`COPY extractor.py vision.py app.py`).
+
+---
+
 ## Entry [2026-06-27] — Interim image-vision receipt path (agent: claude/runbook-setup-config-oxwath)
 
 Closed the "need a GPU box to read receipt images" gap with an interim hosted-vision path, plus

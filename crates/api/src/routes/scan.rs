@@ -23,11 +23,20 @@ use crate::AppState;
 fn format_valid(regex: Option<&str>, serial: &str) -> (Option<bool>, Option<String>) {
     match regex {
         None => (None, None),
-        Some(rx) => match regex::Regex::new(rx) {
+        // Bound compile size/memory: the regex is operator-supplied (Product.serial_format_regex)
+        // and recompiled per verify call. Rust's `regex` is already linear-time (no catastrophic
+        // backtracking), but a size limit caps resource use for an adversarial/huge pattern.
+        Some(rx) => match regex::RegexBuilder::new(rx)
+            .size_limit(1 << 20)
+            .dfa_size_limit(1 << 20)
+            .build()
+        {
             Ok(re) => (Some(re.is_match(serial)), None),
             Err(_) => (
                 None,
-                Some(format!("product serial_format_regex is invalid: {rx}")),
+                Some(format!(
+                    "product serial_format_regex is invalid or too complex: {rx}"
+                )),
             ),
         },
     }
@@ -187,20 +196,48 @@ pub async fn unit_label(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<LabelOut>> {
-    let out = assign_tag(&s, "inventory_unit", id, "CEC-U", "unit").await?;
-    // Record the tag assignment on the unit timeline.
-    log_unit_event(
-        &s.db,
-        id,
-        UnitEventType::Note,
-        None,
-        Some(&out.0.asset_tag),
-        None,
-        None,
-        Some(json!({ "action": "asset_tag_assigned" })),
-    )
-    .await?;
-    Ok(out)
+    // Assign + event in one transaction (was two autocommits — the tag could be set with no
+    // event row). Lock the row; only log when a tag is actually newly minted, so an idempotent
+    // reprint doesn't spam the timeline.
+    let mut tx = s.db.begin().await?;
+    let existing: Option<Option<String>> =
+        sqlx::query_scalar("SELECT asset_tag FROM inventory_unit WHERE id = $1 FOR UPDATE")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let existing = existing.ok_or_else(|| ApiError::NotFound("unit not found".into()))?;
+    let (tag, newly_assigned) = match existing {
+        Some(t) => (t, false),
+        None => {
+            let t = new_tag("CEC-U");
+            sqlx::query("UPDATE inventory_unit SET asset_tag = $2 WHERE id = $1")
+                .bind(id)
+                .bind(&t)
+                .execute(&mut *tx)
+                .await?;
+            (t, true)
+        }
+    };
+    if newly_assigned {
+        log_unit_event(
+            &mut *tx,
+            id,
+            UnitEventType::Note,
+            None,
+            Some(&tag),
+            None,
+            None,
+            Some(json!({ "action": "asset_tag_assigned" })),
+        )
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(Json(LabelOut {
+        asset_tag: tag.clone(),
+        kind: "unit",
+        zpl: zpl(&tag),
+        label_text: tag,
+    }))
 }
 
 pub async fn system_label(
