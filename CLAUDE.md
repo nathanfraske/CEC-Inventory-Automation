@@ -4,6 +4,9 @@
 > This file is auto-loaded into every Claude Code session. Keep it high-signal.
 > If you change how this repo is built, secured, or documented, update this file in the
 > same change and date the edit.
+>
+> **Resuming on a compute box?** Read §8 first — the web-sandbox deviations (no docker daemon,
+> no gitleaks) no longer apply, and there are concrete first steps.
 
 ## 1. What this is
 
@@ -16,6 +19,10 @@ and carrier order tracking.
   diverges, record the decision in `docs/DECISIONS.md` and update the scope.
 - **Build/spin-up procedure:** `AGENT_RUNBOOK.md` (ordered, with acceptance gates A–F).
 - **Secret + database hygiene:** `SECRETS-AND-DATABASE.md` (read before the first commit).
+- **API contract:** `docs/API.md` (full endpoint catalog) + `docs/INTEGRATION.md` (how an
+  external app integrates: bearer tokens, the cec.direct seam, export, conventions).
+- **Audit + remediation status:** `docs/AUDIT-2026-06-27.md` (security + data-integrity/backups
+  panels; what's fixed vs the remaining lower-priority backlog).
 
 The current state lives in **`docs/HANDOFF.md`** (what is done/blocked) and the work queue in
 **`docs/TODO.md`**. Read those two before doing anything.
@@ -84,9 +91,13 @@ tombstone. Anything someone might later ask "what happened to X?" gets a tombsto
   on every session it (a) verifies `.env` is ignored and not tracked, (b) re-asserts
   `core.hooksPath=.githooks`, (c) warms the cargo cache so build/lint/test are ready. Runs
   synchronously so dependencies are present before the agent loop starts.
-- **CI** (`.github/workflows/ci.yml`): `gitleaks` on every push/PR, plus `cargo fmt --check`,
-  `clippy -D warnings`, and `cargo build` with `SQLX_OFFLINE=true`. This is the real backstop:
-  a committed secret fails the build.
+- **CI** (`.github/workflows/ci.yml`) — five jobs: `secret-scan` (gitleaks), `rust`
+  (`fmt --check` / `clippy -D warnings` / `build`, `SQLX_OFFLINE`), `tests` (full integration
+  suite against a Postgres service), `compose` (builds the whole stack and smoke-tests
+  `/readyz` + extractor `/health`), and `supply-chain` (`cargo audit` + `pip-audit`,
+  non-blocking). `.github/dependabot.yml` opens weekly cargo/pip/docker/actions update PRs. CI
+  is the real backstop: a committed secret (or a broken query, since `tests` runs every query
+  against the live schema) fails the build.
 
 ## 5. How to work
 
@@ -107,33 +118,76 @@ just fmt / just lint / just scan
   uses none yet, so `.sqlx/` is intentionally absent until Phase 1 adds checked queries — the
   build is already DB-free. **Regenerate `.sqlx/` after any query change.**
 - **Migrations are append-only:** never edit an applied migration; add a new numbered file.
+  Current set: `0001_init` (18 tables) · `0002_app_user` · `0003_integrity_hardening`
+  (serial/asset-tag uniqueness + append-only triggers) · `0004_app_user_role` (RBAC) ·
+  `0005_api_token`. NOTE: `sqlx::migrate!` embeds at COMPILE time and won't reliably re-embed a
+  new migration on stable Rust unless `crates/api/src/lib.rs` (the macro site) recompiles —
+  touch it or `cargo clean -p cec-inventory-api` (a comment by the macro documents this).
 - **Event logging:** write a `unit_event` row on every unit mutation as each feature lands
-  (scope §16). It is the integrity backbone for RMA/transfer disputes.
+  (scope §16). It is the integrity backbone for RMA/transfer disputes; the audit tables are
+  now **append-only at the DB level** (trigger, migration 0003) — UPDATE/DELETE on them raises.
+- **Auth:** operators use argon2 + signed-cookie sessions (12 h TTL, login throttle, RBAC
+  `admin`/`operator`); external apps use **bearer API tokens** (`/auth/tokens`, admin-only to
+  mint). Cookie writes are CSRF-guarded (same-origin). First run: `POST /auth/bootstrap` makes
+  the first admin. See `docs/INTEGRATION.md`.
+- **Backups:** `just backup` (or `scripts/db_backup.sh`) dumps the DB **and** the receipt object
+  store (the legal RMA proof artifacts) as a paired set; supports age encryption + retention.
+  `scripts/restore_drill.sh` proves the latest backup restores. Schedule with
+  `scripts/systemd/cec-backup.{service,timer}`.
 
 ## 6. Layout
 
 ```
-crates/api       Rust + Axum backend (lib+bin). Spine: /health, /readyz. Phase 0 CRUD:
-                 vendors/manufacturers/products, purchases (+line items, receipt upload),
-                 units (+status change, event timeline), stock. Phase 1: /allocate-costs and
-                 shipment endpoints. UI (HTMX) is still to come.
+crates/api       Rust + Axum backend (lib+bin) + server-rendered HTMX UI. Health spine; full
+                 CRUD (catalog, purchases + line items + receipt upload, units + event timeline,
+                 stock); landed-cost + shipments; warranty + RMA lifecycle; systems (deliver/
+                 validate/sweep/transfer, row-locked); cec.direct seam (availability/reserve/
+                 consume); serial verify + asset tags; identity resolution + bundles;
+                 reorder/reconciliation/export; receipt-extraction seams (from text/image/
+                 payload). Auth (auth.rs): argon2 sessions (TTL + login throttle + RBAC) AND
+                 service-account bearer tokens; CSRF same-origin guard; per-route body limits.
 crates/tracking  carrier-provider trait + poll engine (scope §12); shared by api + poller
 crates/poller    shipment-tracking worker: polls active shipments via crates/tracking
 crates/domain    shared domain types mapping to the Postgres enums
-migrations        SQLx SQL migrations (0001_init = the full Phase 0 schema, 18 tables)
-services/extractor  Python receipt stitch + extraction service (runs on the inference box)
-docs              the scope spec + memory docs (HANDOFF, TODO, DECISIONS)
-scripts           gen_secrets / db_backup / db_restore
-.claude, .githooks  configuration hooks (§4)
+migrations        SQLx migrations (append-only): 0001 init (18 tables) · 0002 app_user ·
+                 0003 integrity (serial/asset-tag uniqueness + append-only triggers) ·
+                 0004 app_user role (RBAC) · 0005 api_token
+services/extractor  Python FastAPI extractor: deterministic template path + vision.py
+                 (stub | `claude` hosted-vision image backend). Local VLM/OpenCV on the GPU box.
+docs              scope spec + memory docs (HANDOFF, TODO, DECISIONS) + API.md + INTEGRATION.md
+                 + AUDIT-2026-06-27.md
+scripts           gen_secrets / db_backup (encrypt + retention) / db_restore / restore_drill /
+                 systemd/cec-backup.{service,timer}
+.claude, .githooks, .github/dependabot.yml   configuration hooks (§4)
 ```
 
 ## 7. Build phases (scope §20)
 
-Phase 0 (scaffold): schema + API spine + secret hygiene + CI. Done.
-Phases 1–5: the **backend for every phase is implemented and tested** (warranty + RMA
-readiness, trade-in/opening-balance intake, systems + delivery, sweep + transfer, RMA
-lifecycle, cec.direct seam, serial verify + asset tags, identity resolution + bundles,
-reorder/reconciliation/export, the Python extractor's deterministic path + Rust seam, and a
-server-rendered UI). See `docs/HANDOFF.md` for the per-section map. Remaining follow-ups
-(compile-time-checked queries + `.sqlx/` + DB-in-CI; extractor VLM/OpenCV; real carrier
-providers; WASM scan fallback + guided capture) are tracked in `docs/TODO.md`.
+**All phases (0–5) are implemented, tested, and hardened.** The backend covers every scope
+section; there is a real operator UI (login + forms + workflow actions + scan island) and a
+documented external-app integration surface (bearer tokens + the cec.direct seam). Two parallel
+audit panels (security + data-integrity/backups) ran, and every Critical/High finding is
+remediated across migrations 0003–0005 + auth/CSRF/backup work — see `docs/AUDIT-2026-06-27.md`.
+CI runs five jobs + Dependabot (§4). Remaining follow-ups — compile-time-checked SQLx + `.sqlx/`
+(D-010); the **local** VLM + OpenCV stitching on the GPU box; real carrier providers; WASM scan
+fallback + guided capture; and the lower-priority audit backlog (per-IP rate limiting, session
+revocation, token scopes, read-only FS, WAL/PITR + offsite, digest pinning) — are in
+`docs/TODO.md`.
+
+## 8. Running on the compute box (the deviations are gone)
+
+This repo was built in a headless web sandbox with **no docker daemon** and **no gitleaks
+binary** (deviations V-001/V-002 in `docs/DECISIONS.md`), so Postgres ran as a native local
+cluster and the container path was verified only on CI. **On a real compute box those no longer
+apply** — first steps:
+
+1. `just secrets` (writes the gitignored `.env`), then `docker compose up -d --build` brings up
+   the whole stack (db + extractor + api + poller). The CI `compose` job already proves this
+   builds + comes up healthy, so **gate E is closeable locally** now.
+2. Install `gitleaks` and run `just scan` to close gate F locally (CI runs it regardless).
+3. Bootstrap the first admin (`POST /auth/bootstrap`), then mint an API token for any external
+   app (`POST /auth/tokens`); see `docs/INTEGRATION.md` and `docs/API.md`.
+4. **GPU/inference box:** enables the real vision path — set `EXTRACTOR_VLM_BACKEND=claude`
+   (hosted interim) or wire the local model + OpenCV stitching in `services/extractor/`.
+5. Stand up scheduled backups: install `scripts/systemd/cec-backup.{service,timer}` and set
+   `BACKUP_AGE_RECIPIENT` (encryption) + an offsite target.

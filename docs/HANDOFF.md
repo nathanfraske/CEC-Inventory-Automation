@@ -6,6 +6,52 @@
 
 ---
 
+## Entry [2026-06-27] — Handoff to a compute box; PR #1 merged (agent: claude/runbook-setup-config-oxwath)
+
+End-of-session state before the project moves from the headless web sandbox to a real compute
+box. **PR #1 (`claude/runbook-setup-config-oxwath` → `main`) merged with CI green** (head
+`db19c2c`, run #61: all five jobs — secret-scan, rust, tests, compose, supply-chain — passed).
+
+### Where the system is
+Functionally complete and hardened. The whole scope (§20 phases 0–5) is implemented and tested;
+there is a real operator UI and a documented external-app integration surface. Current test
+counts: **10 unit + 17 integration** green on a fresh DB; `fmt`/`clippy -D warnings` clean.
+
+- **Backend:** catalog, purchases (+line items, receipt upload, landed-cost), shipments+poller,
+  units (+event timeline, verify, asset tags), warranty + RMA lifecycle, systems (deliver/
+  validate/sweep/transfer, row-locked), cec.direct seam, identity resolution + bundles,
+  reorder/reconciliation/export, receipt-extraction seams (text/image/payload).
+- **Auth:** argon2 + signed-cookie sessions (12 h TTL, login throttle, RBAC admin/operator) AND
+  **service-account bearer tokens** (`/auth/tokens`); CSRF same-origin guard on cookie writes;
+  per-route body limits. Migrations 0001–0005.
+- **UI:** dashboard + read tables + detail pages with workflow actions + entry forms + login +
+  scan island + a receipt-capture block.
+- **Extractor:** deterministic template path + `vision.py` (stub default; `claude` hosted-vision
+  interim). Local VLM/OpenCV is the GPU-box follow-up.
+- **Ops:** full `docker compose` stack (non-root, hardened); backups cover DB **and** the
+  receipt object store, with encryption/retention/scheduling + a tested restore drill.
+- **Docs:** `docs/API.md` (endpoint catalog), `docs/INTEGRATION.md` (external integration),
+  `docs/AUDIT-2026-06-27.md` (audit + remediation status). CLAUDE.md §8 = compute-box first steps.
+
+### Deviations that END on the compute box
+- **V-001 (native Postgres instead of compose `db`)** — on a box with the docker daemon, use
+  `docker compose up -d --build`. The CI `compose` job already proves the stack builds + comes
+  up healthy, so **gate E is closeable locally**.
+- **V-002 (manual gitleaks)** — install `gitleaks`, run `just scan` to close gate F locally.
+
+### First steps on the new box (also CLAUDE.md §8)
+`just secrets` → `docker compose up -d --build` → `POST /auth/bootstrap` (first admin) → mint an
+API token for any external app. For receipt vision, set `EXTRACTOR_VLM_BACKEND=claude` or wire
+the local VLM. Install the backup timer + set `BACKUP_AGE_RECIPIENT` + an offsite target.
+
+### Open (lower priority; `docs/TODO.md` + audit doc)
+Compile-time SQLx + `.sqlx/` (D-010); local VLM + OpenCV stitching; real carrier providers; WASM
+scan fallback + guided capture; and the audit backlog (per-IP rate limiting, server-side session
+revocation, per-endpoint token scopes, read-only container FS, WAL/PITR + automated offsite,
+money f64→string in the extractor path, session-derived event actor, image/Actions digest pinning).
+
+---
+
 ## Entry [2026-06-27] — Audit remediation, 4 batches (agent: claude/runbook-setup-config-oxwath)
 
 Worked the audit backlog (`docs/AUDIT-2026-06-27.md`) in four verified commits after the owner
