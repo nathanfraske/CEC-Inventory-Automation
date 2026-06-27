@@ -1086,3 +1086,121 @@ async fn phase2_verify_and_asset_tags() {
         .unwrap();
     assert_eq!(t2["asset_tag"], tag);
 }
+
+#[tokio::test]
+async fn phase1_identity_resolution_and_bundle_expansion() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+    let mk_product = |model: &str| {
+        let c = &c;
+        let base = &base;
+        let model = model.to_string();
+        async move {
+            let p: Value = c
+                .post(format!("{base}/products"))
+                .json(&json!({ "model": model }))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            p["id"].as_str().unwrap().to_string()
+        }
+    };
+    let cpu = mk_product("CPU combo").await;
+    let board = mk_product("Board combo").await;
+    let placeholder = mk_product("placeholder").await;
+
+    // A combo line at a combined price, initially unresolved.
+    let purchase: Value = c
+        .post(format!("{base}/purchases"))
+        .json(&json!({
+            "source_type": "manual",
+            "line_items": [{ "description_as_printed": "CPU + Board combo", "quantity": 1, "line_total": "500.00" }]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let combo_line = purchase["line_items"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Expand MSRP-weighted (300/200 of 500).
+    let exp: Value = c
+        .post(format!("{base}/line-items/{combo_line}/expand"))
+        .json(&json!({
+            "components": [
+                { "product_id": cpu, "msrp": "300.00" },
+                { "product_id": board, "msrp": "200.00" }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(exp["allocation"], "msrp");
+    let children = exp["children"].as_array().unwrap();
+    assert_eq!(children.len(), 2);
+    let total: f64 = children
+        .iter()
+        .map(|ch| ch["line_total"].as_str().unwrap().parse::<f64>().unwrap())
+        .sum();
+    assert_eq!(total, 500.0);
+    let cpu_child = children.iter().find(|ch| ch["product_id"] == cpu).unwrap();
+    assert_eq!(cpu_child["line_total"], "300.00");
+
+    // Parent is now flagged as a bundle.
+    let got: Value = c
+        .get(format!(
+            "{base}/purchases/{}",
+            purchase["id"].as_str().unwrap()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let parent = got["line_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == combo_line.as_str())
+        .unwrap();
+    assert_eq!(parent["is_bundle"], true);
+
+    // Identity resolution on a fresh line.
+    let li: Value = c
+        .post(format!(
+            "{base}/purchases/{}/line-items",
+            purchase["id"].as_str().unwrap()
+        ))
+        .json(&json!({ "description_as_printed": "mystery", "quantity": 1 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let resolved: Value = c
+        .post(format!(
+            "{base}/line-items/{}/resolve",
+            li["id"].as_str().unwrap()
+        ))
+        .json(&json!({ "product_id": placeholder }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(resolved["product_id"], placeholder);
+    assert_eq!(resolved["resolution_status"], "confirmed");
+}

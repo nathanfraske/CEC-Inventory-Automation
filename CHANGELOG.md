@@ -9,6 +9,10 @@ dating + tombstoning conventions that govern the memory documents.
 ## [Unreleased]
 
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- Identity resolution + bundle expansion (scope §3/§15): `POST /line-items/{id}/resolve`
+  (map a line to a product, status→confirmed) and `POST /line-items/{id}/expand` (split a
+  combo line into child line items by MSRP weight (default) or even, remainder on the last;
+  marks the parent `is_bundle`).
 - Serial verification + asset tags (scope §13): `POST /units/{id}/verify` (binds a serial
   from the scan or confirms a match; warns on `serial_format_regex` mismatch — never blocks),
   and `POST /units|systems|stock/{id}/asset-tag` (assigns an internal CEC-* tag, idempotent,

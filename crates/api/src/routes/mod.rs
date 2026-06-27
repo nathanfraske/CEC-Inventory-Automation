@@ -49,6 +49,11 @@ pub fn router() -> Router<AppState> {
             "/purchases/{id}/allocate-costs",
             post(crate::costing::allocate_costs),
         )
+        .route(
+            "/line-items/{id}/resolve",
+            post(purchases::resolve_line_item),
+        )
+        .route("/line-items/{id}/expand", post(purchases::expand_bundle))
         // shipments + tracking
         .route(
             "/purchases/{id}/shipments",

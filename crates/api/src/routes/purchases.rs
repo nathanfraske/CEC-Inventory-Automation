@@ -6,7 +6,7 @@ use axum::extract::{Multipart, Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, RoundingStrategy};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{FromRow, PgExecutor};
@@ -339,4 +339,151 @@ fn sanitize_filename(name: &str) -> String {
     } else {
         trimmed
     }
+}
+
+// ---------------- identity resolution + bundle expansion (scope §3/§15) ----------------
+
+#[derive(Deserialize)]
+pub struct ResolveLine {
+    pub product_id: Uuid,
+    #[serde(default)]
+    pub resolution_status: Option<ResolutionStatus>,
+}
+
+/// Map a line item to a canonical product (scope §3). Defaults the status to `confirmed`.
+pub async fn resolve_line_item(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(b): Json<ResolveLine>,
+) -> ApiResult<Json<LineItem>> {
+    let status = b.resolution_status.unwrap_or(ResolutionStatus::Confirmed);
+    let sql = format!(
+        "UPDATE purchase_line_item SET product_id = $2, resolution_status = $3 \
+         WHERE id = $1 RETURNING {LINE_COLS}"
+    );
+    let li = sqlx::query_as::<_, LineItem>(&sql)
+        .bind(id)
+        .bind(b.product_id)
+        .bind(status)
+        .fetch_optional(&s.db)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("line item not found".into()))?;
+    Ok(Json(li))
+}
+
+#[derive(Deserialize)]
+pub struct Component {
+    pub product_id: Uuid,
+    #[serde(default)]
+    pub msrp: Option<Decimal>,
+}
+
+#[derive(Deserialize)]
+pub struct ExpandReq {
+    pub components: Vec<Component>,
+    /// "msrp" (default, weight by component MSRP) or "even".
+    #[serde(default)]
+    pub allocation: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ExpandOut {
+    pub parent_line_id: Uuid,
+    pub allocation: String,
+    pub children: Vec<LineItem>,
+}
+
+/// Weight a bundle's total across its components, remainder on the last (scope §15).
+fn allocate_bundle(total: Decimal, msrps: &[Option<Decimal>], by_msrp: bool) -> Vec<Decimal> {
+    let n = msrps.len();
+    let sum: Decimal = msrps.iter().filter_map(|m| *m).sum();
+    let use_msrp = by_msrp && msrps.iter().all(|m| m.is_some()) && sum > Decimal::ZERO;
+    let mut running = Decimal::ZERO;
+    (0..n)
+        .map(|i| {
+            if i == n - 1 {
+                (total - running).round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero)
+            } else {
+                let w = if use_msrp {
+                    msrps[i].unwrap() / sum
+                } else {
+                    Decimal::ONE / Decimal::from(n)
+                };
+                let a =
+                    (total * w).round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero);
+                running += a;
+                a
+            }
+        })
+        .collect()
+}
+
+/// Expand a combo line into child line items, one per component product, each with an
+/// allocated price (scope §15). Marks the parent `is_bundle`.
+pub async fn expand_bundle(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(b): Json<ExpandReq>,
+) -> ApiResult<(StatusCode, Json<ExpandOut>)> {
+    if b.components.is_empty() {
+        return Err(ApiError::BadRequest(
+            "a bundle needs at least one component".into(),
+        ));
+    }
+    let parent: Option<(Uuid, Option<Decimal>, i32)> = sqlx::query_as(
+        "SELECT purchase_id, line_total, quantity FROM purchase_line_item WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&s.db)
+    .await?;
+    let (purchase_id, line_total, quantity) =
+        parent.ok_or_else(|| ApiError::NotFound("line item not found".into()))?;
+    let total = line_total
+        .ok_or_else(|| ApiError::BadRequest("bundle line has no line_total to allocate".into()))?;
+
+    let by_msrp = b.allocation.as_deref() != Some("even");
+    let msrps: Vec<Option<Decimal>> = b.components.iter().map(|c| c.msrp).collect();
+    let allocations = allocate_bundle(total, &msrps, by_msrp);
+    let qty = quantity.max(1);
+
+    let mut tx = s.db.begin().await?;
+    sqlx::query("UPDATE purchase_line_item SET is_bundle = true WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+    let mut children = Vec::with_capacity(b.components.len());
+    let csql = format!(
+        "INSERT INTO purchase_line_item \
+         (purchase_id, product_id, parent_line_id, quantity, unit_price, line_total, resolution_status) \
+         VALUES ($1,$2,$3,$4,$5,$6,'confirmed') RETURNING {LINE_COLS}"
+    );
+    for (c, alloc) in b.components.iter().zip(allocations.iter()) {
+        let unit_price = (*alloc / Decimal::from(qty))
+            .round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero);
+        let child = sqlx::query_as::<_, LineItem>(&csql)
+            .bind(purchase_id)
+            .bind(c.product_id)
+            .bind(id)
+            .bind(qty)
+            .bind(unit_price)
+            .bind(*alloc)
+            .fetch_one(&mut *tx)
+            .await?;
+        children.push(child);
+    }
+    tx.commit().await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(ExpandOut {
+            parent_line_id: id,
+            allocation: if by_msrp {
+                "msrp".into()
+            } else {
+                "even".into()
+            },
+            children,
+        }),
+    ))
 }
