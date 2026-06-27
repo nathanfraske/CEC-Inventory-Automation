@@ -1,0 +1,13 @@
+# gitleaks config. Uses the bundled default rules and allowlists the example env.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders only; .env.example holds no real secrets."
+paths = [
+  '''\.env\.example$''',
+  '''services/extractor/\.env\.example$''',
+]
+regexes = [
+  '''CHANGE_ME[A-Z_0-9]*''',
+]

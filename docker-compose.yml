@@ -1,0 +1,68 @@
+# CEC Inventory single-box stack. Reads .env (gitignored). Never commit .env.
+# Ports bind to 127.0.0.1 only; reach the app over the Headscale mesh, not a public bind.
+# See SECRETS-AND-DATABASE.md for the Docker-secrets variant (POSTGRES_PASSWORD_FILE).
+name: cec-inventory
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data    # named volume, NOT a repo bind mount
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: crates/api/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      API_BIND: ${API_BIND}
+      SESSION_SECRET: ${SESSION_SECRET}
+      RUST_LOG: ${RUST_LOG}
+      STORAGE_BACKEND: ${STORAGE_BACKEND}
+      STORAGE_FS_ROOT: ${STORAGE_FS_ROOT}
+      EXTRACTOR_URL: ${EXTRACTOR_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - objects:/var/lib/cec-inventory/objects
+    restart: unless-stopped
+
+  # poller:
+  #   build: { context: ., dockerfile: crates/poller/Dockerfile }
+  #   environment:
+  #     DATABASE_URL: ${DATABASE_URL}
+  #     CARRIER_PROVIDER: ${CARRIER_PROVIDER}
+  #     CARRIER_API_KEY: ${CARRIER_API_KEY}
+  #     CARRIER_API_SECRET: ${CARRIER_API_SECRET}
+  #     SHIPMENT_POLL_INTERVAL_SECS: ${SHIPMENT_POLL_INTERVAL_SECS}
+  #   depends_on: { db: { condition: service_healthy } }
+  #   restart: unless-stopped
+
+  # minio:   # enable only when STORAGE_BACKEND=minio
+  #   image: minio/minio
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+  #     MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+  #   volumes: ["miniodata:/data"]
+  #   ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+
+volumes:
+  pgdata:
+  objects:
+  # miniodata:
