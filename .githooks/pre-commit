@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# CEC Inventory pre-commit secret-hygiene gate.
+# Defense in depth (SECRETS-AND-DATABASE.md Section 7): block secrets before they land
+# in a commit, not just in CI. Activate once per clone with:
+#     git config core.hooksPath .githooks
+# The SessionStart hook (.claude/hooks/session-start.sh) re-asserts this automatically.
+set -uo pipefail
+
+fail=0
+
+# 1) Never allow a real env file, private key, DB dump, or a secrets/ dir to be staged.
+#    .env.example is the only env file that may be committed (placeholders only).
+staged="$(git diff --cached --name-only --diff-filter=ACM)"
+blocked="$(printf '%s\n' "$staged" \
+  | grep -E '(^|/)\.env$|(^|/)\.env\.[^/]*$|\.key$|\.pem$|\.p12$|\.pfx$|\.agekey$|\.dump$|\.sql\.gz$|(^|/)secrets/' \
+  | grep -vE '(^|/)\.env\.example$' || true)"
+if [ -n "$blocked" ]; then
+  echo "pre-commit: BLOCKED — refusing to commit secret-shaped files:" >&2
+  printf '  %s\n' $blocked >&2
+  echo "  These must never be committed. See SECRETS-AND-DATABASE.md." >&2
+  fail=1
+fi
+
+# 2) Run gitleaks on the staged content if it is installed; warn loudly if it is not.
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks protect --staged --redact; then
+    echo "pre-commit: BLOCKED — gitleaks found a secret in staged changes." >&2
+    fail=1
+  fi
+else
+  echo "pre-commit: WARNING — gitleaks not installed; staged-content scan skipped." >&2
+  echo "  Install gitleaks for full local coverage. CI scans every push regardless." >&2
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "pre-commit: commit aborted. Fix the above and re-stage." >&2
+fi
+exit "$fail"
