@@ -22,8 +22,8 @@ use crate::AppState;
 
 const UNIT_COLS: &str = "id, product_id, line_item_id, system_id, owner, customer_ref, \
     serial_number, serial_source, verified, asset_tag, condition, acquisition_method, status, \
-    location_bin, unit_cost, cec_warranty_class, registered, rma_eligible, rma_block_reason, \
-    notes, intake_at, intake_by";
+    location_bin, unit_cost, mfr_warranty_expires, cec_warranty_class, cec_warranty_start, \
+    cec_warranty_expires, registered, rma_eligible, rma_block_reason, notes, intake_at, intake_by";
 
 #[derive(Serialize, FromRow)]
 pub struct Unit {
@@ -42,7 +42,10 @@ pub struct Unit {
     pub status: UnitStatus,
     pub location_bin: Option<String>,
     pub unit_cost: Option<Decimal>,
+    pub mfr_warranty_expires: Option<chrono::NaiveDate>,
     pub cec_warranty_class: Option<CecWarrantyClass>,
+    pub cec_warranty_start: Option<DateTime<Utc>>,
+    pub cec_warranty_expires: Option<chrono::NaiveDate>,
     pub registered: bool,
     pub rma_eligible: Option<bool>,
     pub rma_block_reason: Option<String>,

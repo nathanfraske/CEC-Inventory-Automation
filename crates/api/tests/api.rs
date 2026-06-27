@@ -549,3 +549,114 @@ async fn phase2_trade_in_and_opening_balance() {
         .unwrap();
     assert_eq!(pur["source_type"], "opening_balance");
 }
+
+#[tokio::test]
+async fn phase3_systems_delivery_starts_cec_clock() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+    c.post(format!("{base}/warranty-policies"))
+        .json(&json!({ "warranty_class": "full", "term_months": 12 }))
+        .send()
+        .await
+        .unwrap();
+    let product: Value = c
+        .post(format!("{base}/products"))
+        .json(&json!({ "model": "Board X", "category": "motherboard" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let product_id = product["id"].as_str().unwrap().to_string();
+    let unit: Value = c
+        .post(format!("{base}/units"))
+        .json(&json!({ "product_id": product_id, "serial_number": "BRD-1" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let unit_id = unit["id"].as_str().unwrap().to_string();
+
+    let system: Value = c
+        .post(format!("{base}/systems"))
+        .json(&json!({ "label": "BUILD-001", "cec_warranty_class": "full" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let system_id = system["id"].as_str().unwrap().to_string();
+
+    c.post(format!("{base}/systems/{system_id}/members"))
+        .json(&json!({ "unit_id": unit_id }))
+        .send()
+        .await
+        .unwrap();
+
+    // Delivery before validation is rejected.
+    let early = c
+        .post(format!("{base}/systems/{system_id}/deliver"))
+        .json(&json!({ "customer_ref": "cust-9" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(early.status(), 400);
+
+    // Validate (EOL pass) → validated.
+    let v: Value = c
+        .post(format!("{base}/systems/{system_id}/validate"))
+        .json(&json!({ "validation_type": "eol", "result": "pass", "performed_by": "bench" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["validation_state"], "validated");
+
+    // Deliver → unit flips to customer and the CEC clock starts.
+    let d: Value = c
+        .post(format!("{base}/systems/{system_id}/deliver"))
+        .json(&json!({ "customer_ref": "cust-9", "performed_by": "front-desk" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(d["units_delivered"], 1);
+
+    let u: Value = c
+        .get(format!("{base}/units/{unit_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(u["owner"], "customer");
+    assert_eq!(u["status"], "with_customer");
+    assert_eq!(u["cec_warranty_class"], "full");
+    assert!(u["cec_warranty_expires"].is_string());
+
+    let events: Value = c
+        .get(format!("{base}/units/{unit_id}/events"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let types: Vec<&str> = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["event_type"].as_str().unwrap())
+        .collect();
+    assert!(types.contains(&"deliver"));
+    assert!(types.contains(&"owner_change"));
+}

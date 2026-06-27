@@ -13,6 +13,7 @@ pub mod intake;
 pub mod purchases;
 pub mod shipments;
 pub mod stock;
+pub mod systems;
 pub mod units;
 pub mod warranty;
 
@@ -68,6 +69,19 @@ pub fn router() -> Router<AppState> {
             "/warranty-policies",
             post(warranty::create_policy).get(warranty::list_policies),
         )
+        // systems + delivery
+        .route(
+            "/systems",
+            post(systems::create_system).get(systems::list_systems),
+        )
+        .route("/systems/{id}", get(systems::get_system))
+        .route("/systems/{id}/members", post(systems::add_member))
+        .route(
+            "/systems/{id}/members/{unit_id}",
+            axum::routing::delete(systems::remove_member),
+        )
+        .route("/systems/{id}/validate", post(systems::validate_system))
+        .route("/systems/{id}/deliver", post(systems::deliver_system))
         // no-receipt intakes
         .route("/trade-ins", post(intake::create_trade_in))
         .route("/opening-balance", post(intake::create_opening_balance))

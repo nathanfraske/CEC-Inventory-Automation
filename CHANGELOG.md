@@ -9,6 +9,12 @@ dating + tombstoning conventions that govern the memory documents.
 ## [Unreleased]
 
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- Systems + delivery (scope §6.1/6.2): System CRUD, membership (`/systems/{id}/members`, a
+  change invalidates), the validation primitive (`/validate` — a passing EOL/post-change
+  validation restores `validated`), and `POST /systems/{id}/deliver` (shop→customer, stamps
+  `delivery_datetime`, starts the per-unit CEC clock with refurb-vs-full class, logs
+  deliver/owner_change + an EOL SystemValidation; requires the system validated). The unit
+  response now includes the mfr/CEC warranty expiry fields.
 - Trade-in & opening-balance intake (scope §8/§9): `POST /trade-ins` and `POST /opening-balance`
   resolve units to `owner=shop` and set RMA readiness from the proof situation (provided →
   pending; will-send → `awaiting_proof_from_customer`; lacks/none/unknown-origin →

@@ -23,6 +23,24 @@ pg_enum!(CecWarrantyClass => "cec_warranty_class" { Full, Refurb, None });
 
 pg_enum!(ValidationState => "validation_state" { Validated, Invalidated, PendingRevalidation });
 
+pg_enum!(SystemStatus => "system_status" {
+    InBuild, InStock, Delivered, InService, RmaOpen, Retired
+});
+
+pg_enum!(ValidationType => "validation_type" {
+    Eol, PostChange, Periodic, PreTransfer, Sweep
+});
+
+pg_enum!(ValidationTrigger => "validation_trigger" {
+    BuildComplete, Rma, PartsSwap, Service, TransferRequest, Audit
+});
+
+pg_enum!(ValidationResult => "validation_result" { Pass, Fail });
+
+pg_enum!(CecWarrantyOutcome => "cec_warranty_outcome" { Carried, Reset, Prorated, Declined });
+
+pg_enum!(TransferResult => "transfer_result" { Completed, BlockedOnSweep, Partial });
+
 pg_enum!(SourceType => "source_type" {
     PhysicalPhoto, Pdf, Email, Manual, TradeIn, OpeningBalance
 });
