@@ -17,6 +17,7 @@ uuid.workspace = true
 chrono.workspace = true
 rust_decimal.workspace = true
 cec-inventory-domain = { path = "../domain" }
+cec-inventory-tracking = { path = "../tracking" }
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["multipart"] }

@@ -39,10 +39,14 @@
   (scope §10).
 - [ ] **[2026-06-27]** Receipt → auto-populated line items with operator confirmation; identity
   resolution with bundle expansion (scope §3, §15).
-- [ ] **[2026-06-27]** Landed-cost allocation (scope §14, default weight-by-line-total / INV-OQ-20).
-- [ ] **[2026-06-27]** Shipment capture + the polling worker: fill `crates/poller` per scope §12
-  (load active shipments, poll provider, write `shipment_event`, stop on delivery). Carrier
-  choice is INV-OQ-30.
+- [x] **[2026-06-27]** Landed-cost allocation (scope §14, default weight-by-line-total / INV-OQ-20).
+  ✅ DONE [2026-06-27] — `POST /purchases/{id}/allocate-costs` + `crates/api/src/costing.rs`.
+- [x] **[2026-06-27]** Shipment capture + the polling worker: fill `crates/poller` per scope §12
+  (load active shipments, poll provider, write `shipment_event`, stop on delivery).
+  ✅ DONE [2026-06-27] — `crates/tracking` (provider trait + mock/none + poll engine), shipment
+  endpoints, and the real poller binary. Real carrier APIs / aggregator remain open (INV-OQ-30).
+- [ ] **[2026-06-27]** Wire a real carrier provider (USPS/UPS/FedEx/DHL direct, or an
+  aggregator) behind the `CarrierProvider` trait; today only `none`/`mock` exist (INV-OQ-30).
 
 ## Open — later phases (track here as they start; full detail in scope §20)
 
@@ -75,3 +79,6 @@
 - ✅ DONE [2026-06-27] Phase 0 manual-entry CRUD: purchases + line items, serialized units,
   bulk stock, receipt-file upload to the object store, and `unit_event` logging on every unit
   mutation, with an integration test. → `docs/HANDOFF.md` entry [2026-06-27] (CRUD).
+- ✅ DONE [2026-06-27] Phase 1 (part): landed-cost allocation (`/allocate-costs`) and shipment
+  capture + polling worker (`crates/tracking`, shipment endpoints, real poller). →
+  `docs/HANDOFF.md` entry [2026-06-27] (Phase 1 part).

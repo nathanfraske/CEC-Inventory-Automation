@@ -211,3 +211,143 @@ async fn phase0_crud_and_event_log_flow() {
         .unwrap();
     assert_eq!(nf.status(), 404);
 }
+
+#[tokio::test]
+async fn phase1_landed_cost_and_shipment_tracking() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+
+    let product: Value = c
+        .post(format!("{base}/products"))
+        .json(&json!({ "model": "PSU 850W", "category": "psu" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let product_id = product["id"].as_str().unwrap().to_string();
+
+    // Purchase: shipping 50 + tax 100 across two lines (1000 qty4, 1500 qty1).
+    let purchase: Value = c
+        .post(format!("{base}/purchases"))
+        .json(&json!({
+            "source_type": "manual",
+            "shipping": "50.00",
+            "tax": "100.00",
+            "line_items": [
+                { "product_id": product_id, "quantity": 4, "line_total": "1000.00" },
+                { "product_id": product_id, "quantity": 1, "line_total": "1500.00" }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let purchase_id = purchase["id"].as_str().unwrap().to_string();
+    let line1 = purchase["line_items"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // A unit bound to line 1 should receive the per-unit landed cost on allocation.
+    let unit: Value = c
+        .post(format!("{base}/units"))
+        .json(&json!({ "product_id": product_id, "line_item_id": line1, "serial_number": "PSU-1" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let unit_id = unit["id"].as_str().unwrap().to_string();
+
+    // Allocate landed cost.
+    let alloc: Value = c
+        .post(format!("{base}/purchases/{purchase_id}/allocate-costs"))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(alloc["extra_total"], "150.00");
+    // line 1: 1000 + 60 = 1060, per-unit 265; line 2: 1500 + 90 = 1590.
+    assert_eq!(alloc["lines"][0]["allocated_landed_cost"], "1060.00");
+    assert_eq!(alloc["lines"][0]["per_unit_cost"], "265.00");
+    assert_eq!(alloc["lines"][1]["allocated_landed_cost"], "1590.00");
+    assert_eq!(alloc["lines"][0]["units_updated"], 1);
+
+    // The bound unit now carries the landed per-unit cost, and a `note` event was logged.
+    let unit2: Value = c
+        .get(format!("{base}/units/{unit_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(unit2["unit_cost"], "265.00");
+    let uevents: Value = c
+        .get(format!("{base}/units/{unit_id}/events"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(uevents
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["event_type"] == "note"));
+
+    // Shipment capture + the poll engine (stepwise mock, exercised directly).
+    let shipment: Value = c
+        .post(format!("{base}/purchases/{purchase_id}/shipments"))
+        .json(&json!({ "carrier": "ups", "tracking_number": "1Z999AA10123456784" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let shipment_id: uuid::Uuid = shipment["id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(shipment["poll_state"], "active");
+
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .connect(&std::env::var("DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    let provider = cec_inventory_tracking::MockProvider::stepwise();
+
+    let statuses = ["pre_transit", "in_transit", "out_for_delivery", "delivered"];
+    for (i, expected) in statuses.iter().enumerate() {
+        let outcome = cec_inventory_tracking::poll_shipment(&pool, &provider, shipment_id)
+            .await
+            .unwrap();
+        let got_status = serde_json::to_value(outcome.status).unwrap();
+        assert_eq!(got_status, json!(expected), "poll {i}");
+    }
+    // A fifth poll is a no-op once delivered/stopped.
+    let after = cec_inventory_tracking::poll_shipment(&pool, &provider, shipment_id)
+        .await
+        .unwrap();
+    assert_eq!(after.new_events, 0);
+
+    let got: Value = c
+        .get(format!("{base}/shipments/{shipment_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(got["status"], "delivered");
+    assert_eq!(got["poll_state"], "stopped");
+    assert_eq!(got["events"].as_array().unwrap().len(), 4);
+    assert!(got["delivered_at"].is_string());
+}

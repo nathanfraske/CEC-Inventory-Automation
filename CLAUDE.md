@@ -115,8 +115,10 @@ just fmt / just lint / just scan
 ```
 crates/api       Rust + Axum backend (lib+bin). Spine: /health, /readyz. Phase 0 CRUD:
                  vendors/manufacturers/products, purchases (+line items, receipt upload),
-                 units (+status change, event timeline), stock. UI (HTMX) is still to come.
-crates/poller    shipment-tracking worker (stub; Phase 1 fills carrier polling)
+                 units (+status change, event timeline), stock. Phase 1: /allocate-costs and
+                 shipment endpoints. UI (HTMX) is still to come.
+crates/tracking  carrier-provider trait + poll engine (scope §12); shared by api + poller
+crates/poller    shipment-tracking worker: polls active shipments via crates/tracking
 crates/domain    shared domain types mapping to the Postgres enums
 migrations        SQLx SQL migrations (0001_init = the full Phase 0 schema, 18 tables)
 services/extractor  Python receipt stitch + extraction service (runs on the inference box)

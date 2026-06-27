@@ -10,6 +10,7 @@ use crate::AppState;
 
 pub mod catalog;
 pub mod purchases;
+pub mod shipments;
 pub mod stock;
 pub mod units;
 
@@ -38,6 +39,18 @@ pub fn router() -> Router<AppState> {
         .route("/purchases/{id}", get(purchases::get_purchase))
         .route("/purchases/{id}/line-items", post(purchases::add_line_item))
         .route("/purchases/{id}/receipt", post(purchases::upload_receipt))
+        .route(
+            "/purchases/{id}/allocate-costs",
+            post(crate::costing::allocate_costs),
+        )
+        // shipments + tracking
+        .route(
+            "/purchases/{id}/shipments",
+            post(shipments::create_shipment),
+        )
+        .route("/shipments", get(shipments::list_shipments))
+        .route("/shipments/{id}", get(shipments::get_shipment))
+        .route("/shipments/{id}/poll", post(shipments::poll_now))
         // serialized units
         .route("/units", post(units::create_unit).get(units::list_units))
         .route("/units/{id}", get(units::get_unit))

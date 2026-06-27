@@ -8,6 +8,15 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-27 — Phase 1 (part): landed cost + order tracking
+- Landed-cost allocation (scope §14): `POST /purchases/{id}/allocate-costs` spreads order-level
+  shipping + tax − discount across lines and writes per-line `allocated_landed_cost` and
+  per-unit `unit_cost` (logging a `note` event per unit). Pure allocator with unit tests.
+- Shipment tracking (scope §12): new `crates/tracking` crate (a `CarrierProvider` trait with
+  `none`/`mock` providers + the poll engine), shipment endpoints (`POST /purchases/{id}/shipments`,
+  `GET /shipments`, `GET /shipments/{id}`, `POST /shipments/{id}/poll`), and a real
+  `crates/poller` worker that polls active shipments and stops on delivery.
+
 ### Added — 2026-06-27 — Phase 0 manual-entry CRUD
 - Catalog/reference endpoints: vendors, manufacturers, products.
 - Purchases with line items (created in one transaction), receipt-file upload to the

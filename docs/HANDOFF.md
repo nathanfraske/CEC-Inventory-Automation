@@ -6,6 +6,43 @@
 
 ---
 
+## Entry [2026-06-27] — Phase 1 (part): landed-cost allocation + shipment tracking (agent: claude/runbook-setup-config-oxwath)
+
+First two Phase 1 features (scope §20), both fully verified here.
+
+### Landed-cost allocation (scope §14)
+- `POST /purchases/{id}/allocate-costs` — spreads order-level shipping + tax − discount across
+  lines weighted by line total (rounding remainder on the last line so parts sum to the whole),
+  writes `allocated_landed_cost` per line, and (default) `unit_cost` per bound unit, logging a
+  `note` `unit_event` per unit touched. Pure allocator in `crates/api/src/costing.rs` with unit
+  tests (no DB).
+
+### Shipment capture + polling worker (scope §12)
+- New `crates/tracking` crate: a `CarrierProvider` trait, a `none` no-op and a deterministic
+  `mock` provider, and the poll engine (`poll_shipment` / `poll_active_shipments`) that writes
+  normalized `shipment_event` rows, advances status, sets shipped/delivered timestamps, and
+  stops on delivered/returned. Idempotent (dedups by status+occurred_at).
+- API: `POST /purchases/{id}/shipments`, `GET /shipments[?active=true]`, `GET /shipments/{id}`
+  (with events), `POST /shipments/{id}/poll` (one tick via `CARRIER_PROVIDER`).
+- `crates/poller` is now real: connects, builds the provider from env, and polls active
+  shipments on the cadence (was a noop stub).
+- Real carrier APIs / aggregator (USPS/UPS/FedEx/DHL/EasyPost) are the documented seam
+  (`provider_from_env` falls back to `none` with a warning) — INV-OQ-30.
+
+### Verification (this environment)
+- `cargo build`/`fmt --check`/`clippy -D warnings` clean. `cargo test -p cec-inventory-api`:
+  3 costing unit tests + 2 integration tests (Phase 0 + Phase 1) all pass against the live DB.
+- Live curl confirmed: allocate-costs returns the 90/60 split (per-unit 1590/265, the bound
+  unit updated); a single mock poll writes 4 events, sets `delivered`/`stopped` with
+  shipped/delivered timestamps, and a second poll is a no-op.
+
+### Still open for Phase 1
+- Python extractor service (scope §11: stitching + template fast-path + VLM), receipt→line
+  items + identity resolution + bundle expansion (§3/§15), and the camera/capture UI (§10).
+  These need the inference box / a browser and are the next slices (see `docs/TODO.md`).
+
+---
+
 ## Entry [2026-06-27] — Phase 0 CRUD: manual entry + receipt upload + event logging (agent: claude/runbook-setup-config-oxwath)
 
 Built the "usable day one" manual-entry surface the scope's Phase 0 calls for (scope §20),

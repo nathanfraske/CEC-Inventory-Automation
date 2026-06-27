@@ -13,6 +13,7 @@ use axum::{routing::get, Json, Router};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
+pub mod costing;
 pub mod error;
 pub mod events;
 pub mod routes;

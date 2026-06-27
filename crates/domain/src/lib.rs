@@ -47,3 +47,11 @@ pg_enum!(UnitEventType => "unit_event_type" {
     LocationChange, OwnerChange, WarrantyRegistered, Revalidated, Transfer,
     RmaOpen, RmaUpdate, ReplaceOut, ReplaceIn, Scrap, Note
 });
+
+pg_enum!(CarrierKind => "carrier_kind" { Usps, Ups, Fedex, Dhl, Other });
+
+pg_enum!(ShipmentStatus => "shipment_status" {
+    PreTransit, LabelCreated, InTransit, OutForDelivery, Delivered, Exception, Returned, Unknown
+});
+
+pg_enum!(PollState => "poll_state" { Active, Stopped });
