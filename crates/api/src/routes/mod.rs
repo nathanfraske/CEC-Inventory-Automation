@@ -130,14 +130,21 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-/// Public, read-only server-rendered UI (scope §18 path 1). Kept outside the auth-protected
-/// data routes; a production deploy puts the whole app behind the Headscale mesh + login.
+/// Public server-rendered UI (scope §18 path 1). The pages render for anyone on the mesh, but
+/// their forms POST to the auth-protected JSON API — so mutations require a logged-in session
+/// (the browser sends the signed cookie automatically). A production deploy puts the whole app
+/// behind the Headscale mesh + login.
 pub fn ui_router() -> Router<AppState> {
     Router::new()
         .route("/", get(ui::dashboard))
+        .route("/ui/login", get(ui::login_page))
+        .route("/ui/new", get(ui::new_entry))
         .route("/ui/units", get(ui::units_page))
+        .route("/ui/units/{id}", get(ui::unit_detail))
         .route("/ui/systems", get(ui::systems_page))
+        .route("/ui/systems/{id}", get(ui::system_detail))
         .route("/ui/purchases", get(ui::purchases_page))
+        .route("/ui/purchases/new", get(ui::new_purchase))
         .route("/ui/scan", get(ui::scan_index))
         .route("/ui/scan/{unit_id}", get(ui::scan_page))
 }

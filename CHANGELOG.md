@@ -8,6 +8,25 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-27 — Operator front-end: login, entry forms, workflow actions
+- The UI is no longer read-only. New server-rendered pages (still no template-engine dep):
+  - **Login / first-run** (`/ui/login`): logs in via `POST /auth/login`, or bootstraps the
+    first operator when `app_user` is empty. Session-aware nav across every page (shows the
+    operator + Logout, or a Login link).
+  - **New entry** (`/ui/new`): HTMX-style forms for vendor, manufacturer, product, serialized
+    unit, bulk stock, and system — each serializes to JSON and POSTs to the API.
+  - **New purchase** (`/ui/purchases/new`): purchase header + repeatable line-item rows → the
+    nested `CreatePurchase` JSON.
+  - **Unit detail** (`/ui/units/{id}`): status-change, asset-tag, open-RMA forms + the full
+    `unit_event` timeline + a camera-verify link.
+  - **System detail** (`/ui/systems/{id}`): members list + add-member, validate, deliver, parts
+    sweep, and transfer actions.
+- Forms POST JSON to the existing auth-protected routes with the browser's signed session
+  cookie, so a logged-in operator's actions just work; anonymous mutations still 401. A single
+  shared `cecSubmit` client helper does serialize-and-POST and renders the result inline.
+- Tests: `ui_pages_render` extended to cover the new public pages and to render the unit/system
+  detail pages against real rows (exercising their joins/enum casts on the live schema).
+
 ### Added — 2026-06-27 — Full one-command stack + container smoke gate
 - `docker-compose.yml` now wires the **whole stack** — `db` + `extractor` + `api` + `poller` —
   with healthchecks and correct service-to-service wiring. The Rust containers build their

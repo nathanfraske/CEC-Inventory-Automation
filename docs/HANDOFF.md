@@ -6,6 +6,51 @@
 
 ---
 
+## Entry [2026-06-27] — Operator front-end: login + entry forms + workflow actions (agent: claude/runbook-setup-config-oxwath)
+
+Turned the read-only UI into a usable operator front-end. Previously you could look (dashboard
++ read-only tables + scan island) but not *do*; now an operator logs in and drives the system
+from the browser.
+
+### What landed (all in `crates/api/src/routes/ui.rs`, registered in `routes/mod.rs`)
+- **Login / first-run** (`/ui/login`) — logs in via `POST /auth/login`, or bootstraps the first
+  operator when `app_user` is empty. **Session-aware nav** on every page (operator + Logout, or
+  a Login link), resolved from the signed cookie server-side (`current_user`).
+- **New entry** (`/ui/new`) — forms for vendor, manufacturer, product, serialized unit, bulk
+  stock, and system. Product/manufacturer/vendor dropdowns are populated server-side; enum
+  fields use `<select>`s of the real PG enum values.
+- **New purchase** (`/ui/purchases/new`) — header + repeatable line-item rows assembled into the
+  nested `CreatePurchase` JSON.
+- **Unit detail** (`/ui/units/{id}`) — change-status, assign-asset-tag, and open-RMA forms, the
+  full `unit_event` timeline, and a camera-verify link.
+- **System detail** (`/ui/systems/{id}`) — members list + add-member, validate, deliver (starts
+  the CEC clock), parts sweep (serials textarea → array), and transfer.
+- A single client helper **`cecSubmit`** serializes any form to JSON (honoring `data-type`
+  number/bool/lines), POSTs/PATCHes to the form's `action` with the session cookie, and renders
+  the JSON result inline (green/red), optionally redirecting/reloading.
+
+### Design note (D-014)
+The UI is a thin presentation layer: **every mutation POSTs JSON to the existing auth-protected
+API routes** with the browser's signed cookie — no parallel form-encoded handlers. One contract,
+auth reused for free. UI pages render publicly; their actions require a logged-in session.
+
+### Verification (this environment)
+- `fmt --check`, `clippy -D warnings` clean; `cargo test --workspace` → **10 unit + 15
+  integration** green. `ui_pages_render` was extended to cover the new public pages and to render
+  the unit/system **detail** pages against real rows (exercising their joins/enum casts on the
+  live schema).
+- Live smoke against the production app (auth ON): `/ui/login` renders; anonymous `POST /vendors`
+  → 401; login sets the cookie; `/auth/me` → the operator; a **cookie-authenticated** `POST
+  /vendors` (the exact path a form takes) → 201; dashboard nav shows `op1 · Logout` when logged
+  in and `Login` when anonymous.
+
+### Still open (see `docs/TODO.md`)
+- WASM scan fallback (Safari/iOS) + guided long-receipt capture (need a device + the inference
+  box). Line-item resolve/expand and a receipt-upload control aren't surfaced in the UI yet
+  (the endpoints exist). Compile-time SQLx + `.sqlx/` remains the standing D-010 follow-up.
+
+---
+
 ## Entry [2026-06-27] — Full one-command stack + container smoke gate (agent: claude/runbook-setup-config-oxwath)
 
 Wired the whole system to come up from a single `docker compose` and made CI prove it on every

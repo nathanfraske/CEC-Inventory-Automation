@@ -1384,6 +1384,87 @@ async fn ui_pages_render() {
         assert!(body.contains(marker), "{path} missing {marker}");
     }
 
+    // The new public form pages render (login is robust to app_user count: both the
+    // first-run and the returning-login branch carry a password field).
+    for (path, marker) in [
+        ("/ui/login", "name=\"password\""),
+        ("/ui/new", "Serialized unit"),
+        ("/ui/purchases/new", "Line items"),
+    ] {
+        let body = c
+            .get(format!("{base}{path}"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(body.contains(marker), "{path} missing {marker}");
+    }
+
+    // Detail pages render against real rows — this exercises the detail joins/enum casts
+    // against the live schema, not just static HTML. (spawn() has auth off, so the JSON
+    // mutations need no cookie.)
+    let prod: Value = c
+        .post(format!("{base}/products"))
+        .json(&json!({ "model": "UI-Detail-Probe" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pid = prod["id"].as_str().unwrap();
+    let unit: Value = c
+        .post(format!("{base}/units"))
+        .json(&json!({ "product_id": pid, "serial_number": "UIDET-1" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let uid2 = unit["id"].as_str().unwrap();
+    let ud = c
+        .get(format!("{base}/ui/units/{uid2}"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(ud.contains("Change status"), "unit detail missing actions");
+    assert!(
+        ud.contains("Event timeline"),
+        "unit detail missing timeline"
+    );
+    assert!(ud.contains("UIDET-1"), "unit detail missing the serial");
+
+    let sys: Value = c
+        .post(format!("{base}/systems"))
+        .json(&json!({ "label": "UI-Detail-System" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let sid = sys["id"].as_str().unwrap();
+    let sd = c
+        .get(format!("{base}/ui/systems/{sid}"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(sd.contains("Add member"), "system detail missing actions");
+    assert!(sd.contains("Parts sweep"), "system detail missing sweep");
+    assert!(
+        sd.contains("Deliver to customer"),
+        "system detail missing deliver"
+    );
+
     // The scan island embeds the unit id and the BarcodeDetector path.
     let uid = uuid::Uuid::new_v4();
     let scan = c

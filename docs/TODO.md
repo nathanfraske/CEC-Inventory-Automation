@@ -62,8 +62,13 @@
   (deterministic template path + Rust seam are done). (§10/§11)
 - [ ] **[2026-06-27]** Real carrier provider(s) behind the `CarrierProvider` trait (USPS/UPS/
   FedEx/DHL or an aggregator); only `none`/`mock` exist. (INV-OQ-30)
-- [ ] **[2026-06-27]** UI: WASM scan fallback (Safari/iOS), guided long-receipt capture, and
-  HTMX-driven manual-entry forms over the JSON API. (§10/§13/§18)
+- ◐ PARTIAL **[2026-06-27]** UI build-out (§10/§13/§18). DONE: login/first-run page +
+  session-aware nav; manual-entry forms (vendor/manufacturer/product/unit/stock/system);
+  new-purchase form with line items; unit detail (status/asset-tag/open-RMA + event timeline);
+  system detail (members/validate/deliver/sweep/transfer). All POST JSON to the auth-protected
+  API with the session cookie (D-014). OUTSTANDING: WASM scan fallback (Safari/iOS) and guided
+  long-receipt capture (need a device + the inference box); line-item resolve/expand and the
+  receipt-upload control are not yet surfaced in the UI (the endpoints exist).
 
 ## Done — Phases 1–5 backend (✅ DONE [2026-06-27], details in HANDOFF + CHANGELOG)
 

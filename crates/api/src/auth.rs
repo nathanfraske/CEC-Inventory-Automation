@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::error::{ApiError, ApiResult};
 use crate::AppState;
 
-const SESSION_COOKIE: &str = "cec_session";
+pub const SESSION_COOKIE: &str = "cec_session";
 
 #[derive(Deserialize)]
 pub struct Credentials {
