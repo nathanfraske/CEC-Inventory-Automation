@@ -5,6 +5,13 @@ two-layer warranty, RMA lifecycle, system re-validation, and order tracking.
 
 Source of truth for the design: `docs/CEC-Inventory-System-Scope.md`.
 
+## API
+The backend is a plain JSON-over-HTTP API.
+- **`docs/API.md`** — the full endpoint reference (every route, method, and auth level).
+- **`docs/INTEGRATION.md`** — how an external app integrates: bearer-token auth, the cec.direct
+  availability/reserve/consume seam, receipt push, export, and conventions, with a curl
+  walkthrough.
+
 ## Spin-up
 Agents and humans: follow `AGENT_RUNBOOK.md`. It is ordered and has acceptance
 gates at each phase.
