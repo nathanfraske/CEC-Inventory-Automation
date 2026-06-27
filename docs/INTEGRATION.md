@@ -100,8 +100,16 @@ and `POST /purchases/from-image` (multipart photo → the vision backend).
   audit trail for RMA/transfer disputes. Treat it as the source of truth for "what happened".
 - The full route list is in `crates/api/src/routes/mod.rs`.
 
-## 7. Not yet available (roadmap)
+## 7. CSRF & cross-origin
 
-CSRF tokens for the multipart routes, per-IP rate limiting, server-side session revocation, and
-fine-grained token scopes (today a token is `operator` or `admin`, not per-endpoint). Tracked in
-`docs/AUDIT-2026-06-27.md` / `docs/TODO.md`.
+Cookie-authenticated, state-changing requests are **same-origin checked**: the browser's
+`Origin`/`Referer` host must match the server's `Host`. This is transparent to a same-origin UI.
+An **external app should use a bearer token** (no cookie), which is not subject to the
+same-origin check — so server-to-server calls with any/no `Origin` work normally. (There is no
+CORS layer; browser cross-origin calls aren't a supported integration path.)
+
+## 8. Not yet available (roadmap)
+
+Per-IP rate limiting, server-side session revocation, and fine-grained token scopes (today a
+token is `operator` or `admin`, not per-endpoint). Tracked in `docs/AUDIT-2026-06-27.md` /
+`docs/TODO.md`.

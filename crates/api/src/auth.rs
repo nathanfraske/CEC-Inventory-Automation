@@ -295,17 +295,68 @@ async fn resolve_role(s: &AppState, headers: &HeaderMap) -> Option<String> {
     None
 }
 
+/// Is this a state-changing method (so CSRF matters)?
+fn is_unsafe_method(m: &axum::http::Method) -> bool {
+    !matches!(
+        *m,
+        axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
+    )
+}
+
+/// True if the request's `Origin` (or `Referer`) host matches the `Host` it was sent to. Used as
+/// the CSRF defense for cookie-authenticated browser requests: a cross-site forged request carries
+/// the attacker's Origin (≠ our Host) and is rejected, while same-origin UI fetches pass. Requests
+/// with no Origin/Referer (curl, server-to-server, bearer clients) are not browser CSRF and pass.
+/// The host[:port] of a URL (e.g. `http://box:8080/x` → `box:8080`), for the same-origin check.
+fn host_of(url: &str) -> Option<&str> {
+    url.split_once("://")
+        .map(|(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or(""))
+}
+
+fn same_origin(headers: &HeaderMap) -> bool {
+    let host = match headers.get(header::HOST).and_then(|v| v.to_str().ok()) {
+        Some(h) => h,
+        None => return true,
+    };
+    let candidate = headers
+        .get(header::ORIGIN)
+        .or_else(|| headers.get(header::REFERER))
+        .and_then(|v| v.to_str().ok());
+    match candidate {
+        Some(url) => host_of(url) == Some(host),
+        None => true, // non-browser client; not a CSRF vector
+    }
+}
+
+/// True if the request carries a valid session cookie (i.e. it is a cookie-authenticated
+/// browser request, the only thing CSRF applies to — bearer-token callers are immune).
+fn has_cookie_session(s: &AppState, headers: &HeaderMap) -> bool {
+    let jar = SignedCookieJar::from_headers(headers, s.cookie_key.clone());
+    session_user(&jar).is_some()
+}
+
+/// CSRF guard: reject a cookie-authenticated, state-changing, cross-origin request.
+fn csrf_ok(s: &AppState, req: &Request) -> bool {
+    !(is_unsafe_method(req.method())
+        && has_cookie_session(s, req.headers())
+        && !same_origin(req.headers()))
+}
+
 /// Middleware: require a valid principal (cookie session or API token) for the wrapped routes.
 pub async fn require_auth(
     State(s): State<AppState>,
     req: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
-    if resolve_role(&s, req.headers()).await.is_some() {
-        Ok(next.run(req).await)
-    } else {
-        Err(ApiError::Unauthorized("authentication required".into()))
+    if resolve_role(&s, req.headers()).await.is_none() {
+        return Err(ApiError::Unauthorized("authentication required".into()));
     }
+    if !csrf_ok(&s, &req) {
+        return Err(ApiError::Forbidden(
+            "cross-origin request blocked (CSRF)".into(),
+        ));
+    }
+    Ok(next.run(req).await)
 }
 
 /// Middleware: require an `admin` principal (the privilege-escalation surface — creating
@@ -316,7 +367,14 @@ pub async fn require_admin(
     next: Next,
 ) -> Result<Response, ApiError> {
     match resolve_role(&s, req.headers()).await.as_deref() {
-        Some("admin") => Ok(next.run(req).await),
+        Some("admin") => {
+            if !csrf_ok(&s, &req) {
+                return Err(ApiError::Forbidden(
+                    "cross-origin request blocked (CSRF)".into(),
+                ));
+            }
+            Ok(next.run(req).await)
+        }
         Some(_) => Err(ApiError::Forbidden("admin role required".into())),
         None => Err(ApiError::Unauthorized("authentication required".into())),
     }

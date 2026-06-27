@@ -1,7 +1,9 @@
 # Multi-stage build for the api. SQLX_OFFLINE lets the build skip a live DB.
 FROM rust:1-bookworm AS build
 WORKDIR /src
-ENV SQLX_OFFLINE=true
+# SQLX_OFFLINE skips a live DB. The CARGO_* vars harden crate downloads against the
+# intermittent HTTP/2-framing flake when fetching from crates.io in CI.
+ENV SQLX_OFFLINE=true CARGO_NET_RETRY=5 CARGO_HTTP_MULTIPLEXING=false
 COPY . .
 RUN cargo build --release -p cec-inventory-api
 

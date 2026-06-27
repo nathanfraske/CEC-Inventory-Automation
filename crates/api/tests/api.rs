@@ -1862,6 +1862,55 @@ async fn auth_bootstrap_login_protect_logout() {
         .iter()
         .all(|t| t.get("token").is_none()));
 
+    // CSRF: a cookie-authenticated, cross-origin state-changing request is blocked…
+    let evil = c
+        .post(format!("{base}/vendors"))
+        .header("origin", "http://evil.example")
+        .json(&json!({ "name": "csrf-attempt" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        evil.status(),
+        403,
+        "cross-origin cookie POST must be blocked"
+    );
+    // …while a same-origin one passes (Origin host matches the request Host).
+    let okorigin = c
+        .post(format!("{base}/vendors"))
+        .header("origin", base.clone())
+        .json(&json!({ "name": "csrf-ok-vendor" }))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        okorigin.status().is_success(),
+        "same-origin cookie POST: {}",
+        okorigin.status()
+    );
+    // A bearer client is immune to CSRF even with a foreign Origin (no cookie involved). Mint a
+    // fresh token (the earlier one was revoked) to prove it.
+    let t2: Value = c
+        .post(format!("{base}/auth/tokens"))
+        .json(&json!({ "label": "csrf-exempt" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let bear2 = reqwest::Client::new();
+    assert!(bear2
+        .post(format!("{base}/vendors"))
+        .bearer_auth(t2["token"].as_str().unwrap())
+        .header("origin", "http://evil.example")
+        .json(&json!({ "name": "bearer-cross-origin-ok" }))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+
     // Logout clears the session.
     c.post(format!("{base}/auth/logout")).send().await.unwrap();
     let after = c.get(format!("{base}/units")).send().await.unwrap();

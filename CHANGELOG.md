@@ -8,6 +8,15 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Security — 2026-06-27 — CSRF defense (same-origin check) + CI build resilience
+- **CSRF:** cookie-authenticated, state-changing requests must be **same-origin** — the `Origin`
+  (or `Referer`) host must match the request `Host`. A cross-site forged request carries the
+  attacker's origin and is rejected (403); same-origin UI fetches pass; non-browser/bearer
+  clients (no `Origin`) and read methods are unaffected. Applies in `require_auth`/`require_admin`.
+- **CI:** the Rust image builds set `CARGO_NET_RETRY=5` + `CARGO_HTTP_MULTIPLEXING=false` to
+  ride out the intermittent HTTP/2-framing flake when fetching crates from crates.io (seen as a
+  transient `compose` job failure).
+
 ### Added — 2026-06-27 — Backup automation (schedule, encryption, retention, restore drill)
 - `db_backup.sh` gains optional at-rest **encryption** (`BACKUP_AGE_RECIPIENT` → age) and
   **retention pruning** (`BACKUP_RETENTION_DAYS`, default 30).
