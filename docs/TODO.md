@@ -50,8 +50,12 @@
 
 ## Open — hardening follow-ups (backend for Phases 1–5 is done; see HANDOFF [2026-06-27])
 
-- [ ] **[2026-06-27]** Migrate to compile-time-checked SQLx queries + commit `.sqlx/`, and add
-  a Postgres-service CI job that runs `cargo test` (integration tests self-skip today). (D-010)
+- ◐ PARTIAL **[2026-06-27]** SQLx hardening (D-010). DONE: a CI `tests` job runs the full
+  integration suite against a Postgres service, validating every exercised query against the
+  live schema on each push. OUTSTANDING: convert runtime `query`/`query_as` to compile-time
+  `query!`/`query_as!` + commit `.sqlx/` (a large rewrite — the current SQL is built with
+  `format!` column-list consts that macros can't take; the CI run covers the correctness gap
+  meanwhile).
 - [ ] **[2026-06-27]** Extractor: wire a real VLM + OpenCV stitching on the inference box
   (deterministic template path + Rust seam are done). (§10/§11)
 - [ ] **[2026-06-27]** Real carrier provider(s) behind the `CarrierProvider` trait (USPS/UPS/
