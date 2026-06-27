@@ -13,6 +13,7 @@ pub mod direct;
 pub mod intake;
 pub mod purchases;
 pub mod rma;
+pub mod scan;
 pub mod shipments;
 pub mod stock;
 pub mod systems;
@@ -61,6 +62,10 @@ pub fn router() -> Router<AppState> {
         .route("/units/{id}", get(units::get_unit))
         .route("/units/{id}/status", patch(units::change_status))
         .route("/units/{id}/events", get(units::list_events))
+        .route("/units/{id}/verify", post(scan::verify_unit))
+        .route("/units/{id}/asset-tag", post(scan::unit_label))
+        .route("/systems/{id}/asset-tag", post(scan::system_label))
+        .route("/stock/{id}/asset-tag", post(scan::stock_label))
         .route("/units/{id}/warranty", get(warranty::warranty_view))
         .route(
             "/units/{id}/recompute-warranty",

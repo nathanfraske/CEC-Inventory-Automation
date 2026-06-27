@@ -1003,3 +1003,86 @@ async fn phase5_direct_reserve_consume() {
     assert!(avail["serialized"].is_array());
     assert!(avail["bulk"].is_array());
 }
+
+#[tokio::test]
+async fn phase2_verify_and_asset_tags() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+    let product: Value = c
+        .post(format!("{base}/products"))
+        .json(&json!({ "model": "GPU V", "category": "gpu", "serial_format_regex": r"^GPU-\d{4}[A-Z]$" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let product_id = product["id"].as_str().unwrap().to_string();
+
+    let unit: Value = c
+        .post(format!("{base}/units"))
+        .json(&json!({ "product_id": product_id }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let unit_id = unit["id"].as_str().unwrap().to_string();
+    let v: Value = c
+        .post(format!("{base}/units/{unit_id}/verify"))
+        .json(&json!({ "scanned_serial": "GPU-1234A" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["bound_from_scan"], true);
+    assert_eq!(v["verified"], true);
+    assert_eq!(v["format_valid"], true);
+
+    let v2: Value = c
+        .post(format!("{base}/units/{unit_id}/verify"))
+        .json(&json!({ "scanned_serial": "GPU-1234A" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v2["matched"], true);
+    let v3: Value = c
+        .post(format!("{base}/units/{unit_id}/verify"))
+        .json(&json!({ "scanned_serial": "WRONG" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v3["matched"], false);
+    assert_eq!(v3["format_valid"], false);
+    assert!(!v3["warnings"].as_array().unwrap().is_empty());
+
+    let t1: Value = c
+        .post(format!("{base}/units/{unit_id}/asset-tag"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let tag = t1["asset_tag"].as_str().unwrap().to_string();
+    assert!(tag.starts_with("CEC-U-"));
+    assert!(t1["zpl"].as_str().unwrap().contains(&tag));
+    let t2: Value = c
+        .post(format!("{base}/units/{unit_id}/asset-tag"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(t2["asset_tag"], tag);
+}
