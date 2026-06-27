@@ -1,6 +1,6 @@
 # Extractor web layer (scope §11.3). The vision model + OpenCV are added on the inference
 # box image; this base runs the deterministic template fast-path and the API.
-FROM python:3.12-slim
+FROM python:3.14-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements.txt .
