@@ -77,7 +77,9 @@ services:
       extractor:
         condition: service_started
     ports:
-      - "127.0.0.1:8080:8080"
+      # Host-published port is configurable: on boxes where 8080 is already taken
+      # (e.g. the cec-llm-broker), set API_PUBLISH_PORT in .env. Container stays 8080.
+      - "127.0.0.1:${API_PUBLISH_PORT:-8080}:8080"
     volumes:
       - objects:/var/lib/cec-inventory/objects
     healthcheck:
