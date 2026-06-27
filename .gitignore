@@ -1,0 +1,58 @@
+# ---- Secrets and environment (NEVER commit) ----
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+secrets/
+*.secret
+*.key
+*.pem
+*.p12
+*.pfx
+*.agekey
+age.txt
+sops.yaml.dec
+
+# ---- Database data and dumps (NEVER commit) ----
+pgdata/
+db_data/
+postgres-data/
+minio-data/
+/data/
+*.sqlite
+*.sqlite3
+*.db
+*.sql.gz
+*.dump
+*.bak
+backups/
+dumps/
+
+# ---- Rust ----
+/target/
+**/target/
+*.pdb
+# NOTE: .sqlx/ is intentionally committed (SQLx offline query cache, contains no secrets).
+# Do NOT add .sqlx/ here.
+
+# ---- Python (extractor service) ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Frontend build output (if a JS toolchain is added later) ----
+node_modules/
+dist/
+.cache/
+
+# ---- Editor / OS ----
+.idea/
+.vscode/
+.DS_Store
+*.swp

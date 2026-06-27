@@ -1,0 +1,13 @@
+# Nightly schedule for cec-backup.service. Enable with:
+#   sudo systemctl enable --now cec-backup.timer
+# Check: systemctl list-timers cec-backup.timer ; journalctl -u cec-backup.service
+[Unit]
+Description=Run the CEC Inventory backup nightly
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true          # run on next boot if the box was off at the scheduled time
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,18 @@
+# CEC Inventory backup (DB + object store). Install on the target box:
+#   sudo cp scripts/systemd/cec-backup.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now cec-backup.timer
+# Adjust WorkingDirectory/User to your checkout + the operator account. The script reads .env
+# (BACKUP_DIR, BACKUP_AGE_RECIPIENT, BACKUP_RETENTION_DAYS, STORAGE_FS_ROOT, DATABASE_URL).
+[Unit]
+Description=CEC Inventory backup (database + receipt object store)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/cec-inventory
+User=cec
+ExecStart=/opt/cec-inventory/scripts/db_backup.sh
+# Surface failures to the journal (and to any OnFailure handler you add).
+StandardOutput=journal
+StandardError=journal
