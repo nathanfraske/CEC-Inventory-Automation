@@ -1783,6 +1783,85 @@ async fn auth_bootstrap_login_protect_logout() {
         .status()
         .is_success());
 
+    // --- API service-account tokens (external integration) ---
+    // Admin mints an operator token; the plaintext is returned once.
+    let tok: Value = c
+        .post(format!("{base}/auth/tokens"))
+        .json(&json!({ "label": "cec.direct integration", "role": "operator" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let token = tok["token"].as_str().unwrap().to_string();
+    assert!(token.starts_with("cec_pat_"));
+    let token_id = tok["id"].as_str().unwrap().to_string();
+
+    // A bearer token (no cookie) authenticates the data routes…
+    let bearer = reqwest::Client::new();
+    assert!(bearer
+        .get(format!("{base}/units"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+    // …but an operator token can't reach the admin surface.
+    let tok_admin = bearer
+        .post(format!("{base}/auth/users"))
+        .bearer_auth(&token)
+        .json(&json!({ "username": "tok-made", "password": "operator-pass-12" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(tok_admin.status(), 403);
+    // No/garbage bearer → 401.
+    assert_eq!(
+        bearer
+            .get(format!("{base}/units"))
+            .bearer_auth("cec_pat_not-a-real-token")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+
+    // Admin revokes the token → it stops working.
+    let rev = c
+        .post(format!("{base}/auth/tokens/{token_id}/revoke"))
+        .send()
+        .await
+        .unwrap();
+    assert!(rev.status().is_success());
+    assert_eq!(
+        bearer
+            .get(format!("{base}/units"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401,
+        "revoked token must be rejected"
+    );
+    // The listing shows metadata but never the secret.
+    let list: Value = c
+        .get(format!("{base}/auth/tokens"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(list
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t.get("token").is_none()));
+
     // Logout clears the session.
     c.post(format!("{base}/auth/logout")).send().await.unwrap();
     let after = c.get(format!("{base}/units")).send().await.unwrap();

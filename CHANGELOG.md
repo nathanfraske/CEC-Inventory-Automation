@@ -8,6 +8,18 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-27 — Service-account API tokens for external integration (D-018)
+- External/machine-to-machine apps now authenticate with a bearer token
+  (`Authorization: Bearer cec_pat_…`) instead of a cookie session. New `api_token` table
+  (migration 0005) stores only the SHA-256 hash + a role; admins mint/list/revoke via
+  `POST/GET /auth/tokens` and `POST /auth/tokens/{id}/revoke` (token plaintext shown once).
+- A single `resolve_role` backs both cookie and bearer auth across `require_auth`/`require_admin`,
+  so every protected route accepts either. New dep: `sha2`.
+- `docs/INTEGRATION.md` documents the full external-integration contract (auth, the cec.direct
+  availability/reserve/consume seam, receipt push, export, conventions).
+- Auth integration test covers: mint → bearer access → operator-token-can't-admin → revoke →
+  rejected → listing hides the secret.
+
 ### Security — 2026-06-27 — Audit remediation batch 4: container + supply-chain hardening
 - **Non-root containers:** the api, poller, and extractor images run as uid 10001 (the api
   owns its object-store dir so the named volume inherits the ownership).

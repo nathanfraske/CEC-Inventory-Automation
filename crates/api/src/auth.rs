@@ -7,17 +7,21 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use argon2::password_hash::rand_core::OsRng;
+use argon2::password_hash::rand_core::{OsRng, RngCore};
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
-use axum::extract::{Request, State};
+use axum::extract::{Path, Request, State};
+use axum::http::{header, HeaderMap};
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Json;
 use axum_extra::extract::cookie::{Cookie, SameSite, SignedCookieJar};
-use serde::Deserialize;
+use base64::Engine;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
@@ -226,46 +230,192 @@ pub async fn me(State(s): State<AppState>, jar: SignedCookieJar) -> ApiResult<Js
     ))
 }
 
-/// Middleware: require a valid, unexpired signed session for the wrapped routes. The jar is
-/// rebuilt from the request headers with the state's key (rather than relying on the extractor
-/// inside `from_fn_with_state`).
+// ---------------------------------------------------------------------------
+// principal resolution: a request is authenticated by EITHER a session cookie
+// (operators in a browser) OR an `Authorization: Bearer <token>` API token
+// (external/service-account apps). Both carry a role.
+// ---------------------------------------------------------------------------
+
+fn sha256_hex(s: &str) -> String {
+    Sha256::digest(s.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Mint a new API token: returns (plaintext shown once, sha256 hex stored). The `cec_pat_`
+/// prefix makes leaked tokens recognizable (e.g. to secret scanners).
+fn new_token() -> (String, String) {
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    let body = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    let plaintext = format!("cec_pat_{body}");
+    let hash = sha256_hex(&plaintext);
+    (plaintext, hash)
+}
+
+/// Resolve the caller's role from the session cookie or a bearer API token; `None` if neither
+/// authenticates. Tokens are looked up by their sha256 hash; a valid token bumps `last_used_at`.
+async fn resolve_role(s: &AppState, headers: &HeaderMap) -> Option<String> {
+    // 1) Session cookie (TTL-checked).
+    let jar = SignedCookieJar::from_headers(headers, s.cookie_key.clone());
+    if let Some(uid) = session_user(&jar) {
+        if let Ok(Some(role)) =
+            sqlx::query_scalar::<_, String>("SELECT role FROM app_user WHERE id = $1")
+                .bind(uid)
+                .fetch_optional(&s.db)
+                .await
+        {
+            return Some(role);
+        }
+    }
+    // 2) Bearer API token.
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|t| !t.is_empty())?;
+    let hash = sha256_hex(token);
+    let row: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, role FROM api_token WHERE token_hash = $1 AND revoked_at IS NULL",
+    )
+    .bind(&hash)
+    .fetch_optional(&s.db)
+    .await
+    .ok()
+    .flatten();
+    if let Some((id, role)) = row {
+        let _ = sqlx::query("UPDATE api_token SET last_used_at = now() WHERE id = $1")
+            .bind(id)
+            .execute(&s.db)
+            .await; // best-effort
+        return Some(role);
+    }
+    None
+}
+
+/// Middleware: require a valid principal (cookie session or API token) for the wrapped routes.
 pub async fn require_auth(
     State(s): State<AppState>,
     req: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
-    let jar = SignedCookieJar::from_headers(req.headers(), s.cookie_key.clone());
-    let uid = session_user(&jar)
-        .ok_or_else(|| ApiError::Unauthorized("authentication required".into()))?;
-    let exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM app_user WHERE id = $1")
-        .bind(uid)
-        .fetch_optional(&s.db)
-        .await?;
-    if exists.is_none() {
-        return Err(ApiError::Unauthorized("authentication required".into()));
+    if resolve_role(&s, req.headers()).await.is_some() {
+        Ok(next.run(req).await)
+    } else {
+        Err(ApiError::Unauthorized("authentication required".into()))
     }
-    Ok(next.run(req).await)
 }
 
-/// Middleware: require a valid session whose user has the `admin` role (privilege-escalation
-/// surface — creating operators). Operators get 403.
+/// Middleware: require an `admin` principal (the privilege-escalation surface — creating
+/// operators / minting tokens). Non-admins get 403.
 pub async fn require_admin(
     State(s): State<AppState>,
     req: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
-    let jar = SignedCookieJar::from_headers(req.headers(), s.cookie_key.clone());
-    let uid = session_user(&jar)
-        .ok_or_else(|| ApiError::Unauthorized("authentication required".into()))?;
-    let role: Option<String> = sqlx::query_scalar("SELECT role FROM app_user WHERE id = $1")
-        .bind(uid)
-        .fetch_optional(&s.db)
-        .await?;
-    match role.as_deref() {
+    match resolve_role(&s, req.headers()).await.as_deref() {
         Some("admin") => Ok(next.run(req).await),
         Some(_) => Err(ApiError::Forbidden("admin role required".into())),
         None => Err(ApiError::Unauthorized("authentication required".into())),
     }
+}
+
+// ---------------------------------------------------------------------------
+// API token management (admin-only; mounted behind `require_admin`).
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct CreateToken {
+    pub label: String,
+    /// `operator` (default) or `admin`.
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+/// Mint a service-account token. The plaintext is returned ONCE; only its hash is stored.
+pub async fn create_token(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Json(b): Json<CreateToken>,
+) -> ApiResult<Json<Value>> {
+    if b.label.trim().is_empty() {
+        return Err(ApiError::BadRequest("label is required".into()));
+    }
+    let role = match b.role.as_deref() {
+        Some("admin") => "admin",
+        _ => "operator",
+    };
+    // Record which operator minted it (from the session cookie, if that's how they're calling).
+    let jar = SignedCookieJar::from_headers(&headers, s.cookie_key.clone());
+    let created_by = match session_user(&jar) {
+        Some(uid) => sqlx::query_scalar::<_, String>("SELECT username FROM app_user WHERE id = $1")
+            .bind(uid)
+            .fetch_optional(&s.db)
+            .await
+            .ok()
+            .flatten(),
+        None => None,
+    };
+    let (plaintext, hash) = new_token();
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO api_token (label, token_hash, role, created_by) VALUES ($1,$2,$3,$4) RETURNING id",
+    )
+    .bind(b.label.trim())
+    .bind(&hash)
+    .bind(role)
+    .bind(created_by)
+    .fetch_one(&s.db)
+    .await?;
+    Ok(Json(json!({
+        "id": id,
+        "label": b.label.trim(),
+        "role": role,
+        "token": plaintext,
+        "note": "store this token now — it is shown only once and cannot be recovered",
+    })))
+}
+
+#[derive(Serialize, FromRow)]
+pub struct TokenInfo {
+    pub id: Uuid,
+    pub label: String,
+    pub role: String,
+    pub created_by: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// List tokens (metadata only — never the secret).
+pub async fn list_tokens(State(s): State<AppState>) -> ApiResult<Json<Vec<TokenInfo>>> {
+    let rows = sqlx::query_as::<_, TokenInfo>(
+        "SELECT id, label, role, created_by, created_at, last_used_at, revoked_at \
+         FROM api_token ORDER BY created_at DESC",
+    )
+    .fetch_all(&s.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+/// Revoke a token (idempotent-ish: 404 if unknown or already revoked).
+pub async fn revoke_token(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Value>> {
+    let n =
+        sqlx::query("UPDATE api_token SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL")
+            .bind(id)
+            .execute(&s.db)
+            .await?
+            .rows_affected();
+    if n == 0 {
+        return Err(ApiError::NotFound(
+            "token not found or already revoked".into(),
+        ));
+    }
+    Ok(Json(json!({ "ok": true, "id": id, "revoked": true })))
 }
 
 /// Public auth routes (login/bootstrap/logout/me).

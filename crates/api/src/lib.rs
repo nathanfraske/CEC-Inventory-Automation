@@ -65,7 +65,7 @@ pub async fn build_state() -> anyhow::Result<AppState> {
     // migration is added on stable Rust — touch this file (or `cargo clean -p cec-inventory-api`)
     // so the macro re-reads the directory. Current set: 0001 init, 0002 app_user,
     // 0003 integrity_hardening (serial/asset-tag uniqueness + append-only triggers),
-    // 0004 app_user_role (RBAC).
+    // 0004 app_user_role (RBAC), 0005 api_token (service-account bearer tokens).
     sqlx::migrate!("../../migrations").run(&db).await?;
 
     // Cookie signing key from SESSION_SECRET. Fail closed (like DATABASE_URL): no baked-in
@@ -106,9 +106,15 @@ pub fn build_app(state: AppState, require_auth: bool) -> Router {
         ));
     }
 
-    // Operator creation is the privilege-escalation surface — gate it behind `require_admin`
-    // (which does its own session check), kept separate from the operator-level routes.
-    let mut admin = Router::new().route("/auth/users", post(auth::create_user));
+    // Privilege-escalation surface (creating operators + minting API tokens) — gate behind
+    // `require_admin` (which does its own principal check), separate from operator-level routes.
+    let mut admin = Router::new()
+        .route("/auth/users", post(auth::create_user))
+        .route(
+            "/auth/tokens",
+            post(auth::create_token).get(auth::list_tokens),
+        )
+        .route("/auth/tokens/{id}/revoke", post(auth::revoke_token));
     if require_auth {
         admin = admin.route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
