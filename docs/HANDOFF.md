@@ -6,6 +6,45 @@
 
 ---
 
+## Entry [2026-06-27] — Audit remediation, 4 batches (agent: claude/runbook-setup-config-oxwath)
+
+Worked the audit backlog (`docs/AUDIT-2026-06-27.md`) in four verified commits after the owner
+chose **globally-unique serials** and **all four batches**. Each batch: build + `fmt --check` +
+`clippy -D warnings` + `cargo test --workspace` (10 unit + 17 integration) green on a **fresh**
+DB, then pushed.
+
+- **Batch 1 — integrity constraints (migration 0003).** Serial numbers globally unique (partial
+  unique index; dup → 409; D-017), `stock_item.asset_tag` unique, and append-only triggers on
+  `unit_event`/`system_validation`/`system_transfer`/`shipment_event`. Tests use unique-per-run
+  serials (`sn()`); new `serial_number_globally_unique` test.
+- **Batch 2 — DB-integrity guards.** `lock_system()` row-locks (`FOR UPDATE`) inside the tx for
+  all six system mutators (fixes deliver/transfer/sweep/member TOCTOU); `units.change_status`
+  enforces a transition matrix (`scrapped` terminal, etc.); `rma.update_rma` blocks reopening a
+  closed case; `/export` adds the missing business tables (excludes `app_user` credentials).
+- **Batch 3 — auth/access (migration 0004).** Signed-cookie session TTL (12 h); in-memory login
+  throttle (10 fails → 15-min lock, 429); RBAC `admin`/`operator` with the bootstrap account as
+  admin and `POST /auth/users` behind `require_admin`. Auth test extended for the role gating.
+- **Batch 4 — container/supply-chain.** Non-root images (uid 10001); compose `cap_drop:[ALL]` +
+  `no-new-privileges` + mem/pids limits; CI `supply-chain` job (`cargo audit` + `pip-audit`,
+  non-blocking) + `.github/dependabot.yml`.
+
+### Gotchas recorded
+- `sqlx::migrate!` embeds at COMPILE time and doesn't reliably re-embed a new migration on
+  stable Rust unless `lib.rs` (the macro site) is recompiled — touch it / `cargo clean -p` (a
+  comment there documents this). CI rust-cache could otherwise skip embedding a new migration.
+- A persistent dev DB now needs a clean slate after the uniqueness migration (dedup or
+  drop/recreate). `DROP DATABASE … ; CREATE …` must be **two** `psql -c` calls (a single combined
+  `-c` runs in one tx and fails for DATABASE ops).
+
+### Remaining audit backlog (all the `◐`/`⬜` items in docs/AUDIT-2026-06-27.md)
+Server-side session revocation (session table), per-IP/persistent login limiting, finer RBAC +
+`/export` admin-gating + session-derived `actor`, CSRF tokens for multipart, read-only container
+FS + db cap hardening, base-image/Actions digest pinning + flip audit to blocking, backup
+automation/encryption/offsite + restore drill + WAL/PITR, money f64→string in the extractor
+path, cross-table asset-tag uniqueness, policy-lookup unique constraints, argon2 param pinning.
+
+---
+
 ## Entry [2026-06-27] — Security + data-integrity/backups audit panels + remediation (agent: claude/runbook-setup-config-oxwath)
 
 Ran two parallel reviewer panels (3 security lenses: secrets/auth/session, injection/input,

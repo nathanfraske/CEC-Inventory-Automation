@@ -52,16 +52,19 @@
 
 ## Open — audit remediation backlog (panels ran 2026-06-27; full list in docs/AUDIT-2026-06-27.md)
 
-- ◐ PARTIAL **[2026-06-27]** Audit panels (security + data-integrity/backups). DONE this pass:
-  object-store backup (Critical), `SESSION_SECRET` fail-closed, body-size limits,
-  reserve/consume + rma_update/unit_label transactional fixes, regex size limit, extraction
-  validation, password floor 12, constant-time login. OUTSTANDING (prioritized in the audit doc):
-  login rate-limiting; session expiry/revocation; RBAC + server-derived actor; **serial-number
-  uniqueness (owner decision needed)**; append-only DB enforcement (trigger/role); system-gating
-  TOCTOU locks; status-transition matrix; `/export` completeness; asset-tag uniqueness; backup
-  automation/encryption/offsite + restore drill + WAL/PITR; non-root containers + resource
-  limits; `cargo audit`/`pip-audit`/dependabot + image-digest pinning; vision egress audit
-  log/size cap.
+- ◐ PARTIAL **[2026-06-27]** Audit panels (security + data-integrity/backups), worked in 4
+  batches — full status in `docs/AUDIT-2026-06-27.md`. DONE: object-store backup (Critical);
+  `SESSION_SECRET` fail-closed; body-size limits; reserve/consume + rma_update/unit_label
+  transactional fixes; regex size limit; extraction validation; password floor 12; constant-time
+  login; **serial-number uniqueness (globally unique, D-017)** + asset-tag uniqueness +
+  append-only triggers (migration 0003); system-gating TOCTOU locks; status-transition matrix;
+  `/export` completeness; session TTL + login throttle + RBAC (migration 0004); non-root
+  containers + cap_drop/limits; `cargo audit`/`pip-audit`/dependabot. OUTSTANDING: server-side
+  session revocation; per-IP/persistent login limiting; finer RBAC + `/export` admin-gating +
+  session-derived actor; CSRF tokens (multipart); read-only container FS + db cap hardening;
+  image/Actions digest pinning + flip audit to blocking; backup automation/encryption/offsite +
+  restore drill + WAL/PITR; money f64→string in the extractor path; cross-table asset-tag
+  uniqueness; policy-lookup unique constraints; argon2 param pinning; vision egress audit/size cap.
 
 ## Open — hardening follow-ups (backend for Phases 1–5 is done; see HANDOFF [2026-06-27])
 

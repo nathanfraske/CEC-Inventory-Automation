@@ -83,3 +83,29 @@ jobs:
       - name: tear down (remove volumes)
         if: always()
         run: docker compose down -v
+
+  # Dependency advisory scanning (audit: supply-chain). cargo-audit over Cargo.lock + pip-audit
+  # over the extractor requirements. Currently non-blocking (continue-on-error) so it surfaces
+  # advisories as a visible signal without breaking the pipeline on transitive issues we can't
+  # immediately fix; flip to blocking once the advisory backlog is clean. Dependabot
+  # (.github/dependabot.yml) opens the update PRs.
+  supply-chain:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          # RUSTSEC-2023-0071 (rsa Marvin attack) enters via sqlx-mysql; we use postgres only,
+          # so it is not on our compiled path. Remove the ignore if a fixed rsa ships.
+          cargo audit --ignore RUSTSEC-2023-0071
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: pip-audit (extractor)
+        run: |
+          pip install pip-audit
+          pip-audit -r services/extractor/requirements.txt

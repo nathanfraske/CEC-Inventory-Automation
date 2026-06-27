@@ -8,6 +8,15 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Security — 2026-06-27 — Audit remediation batch 4: container + supply-chain hardening
+- **Non-root containers:** the api, poller, and extractor images run as uid 10001 (the api
+  owns its object-store dir so the named volume inherits the ownership).
+- **Compose hardening:** `cap_drop:[ALL]` + `no-new-privileges` + `mem_limit`/`pids_limit` on
+  api/poller/extractor; db keeps caps for its entrypoint but gets `no-new-privileges` + limits.
+- **Supply-chain:** new CI `supply-chain` job runs `cargo audit` (ignoring the off-path `rsa`
+  RUSTSEC-2023-0071) + `pip-audit` (non-blocking for now); `.github/dependabot.yml` opens weekly
+  cargo/pip/docker/github-actions update PRs.
+
 ### Security — 2026-06-27 — Audit remediation batch 3: auth/access hardening
 - **Session TTL:** the signed cookie now carries its issue time; sessions expire after 12 h
   (absolute), enforced in `require_auth`/`me`. Old timestamp-less cookies read as expired.

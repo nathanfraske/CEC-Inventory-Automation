@@ -24,6 +24,12 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    # postgres drops to its own user + needs caps in its entrypoint (chown/gosu), so no
+    # cap_drop here; no-new-privileges + limits are still safe.
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    pids_limit: 300
 
   extractor:
     build:
@@ -45,6 +51,12 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+    pids_limit: 200
 
   api:
     build:
@@ -74,6 +86,12 @@ services:
       timeout: 3s
       retries: 12
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    pids_limit: 200
 
   poller:
     build:
@@ -90,6 +108,12 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 200
 
   # minio:   # enable only when STORAGE_BACKEND=minio
   #   image: minio/minio

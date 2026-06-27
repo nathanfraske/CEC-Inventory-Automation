@@ -1,0 +1,33 @@
+# Dependency update + advisory automation (audit: supply-chain). Dependabot opens PRs for
+# outdated/vulnerable deps across every ecosystem in the repo, and (with the digest strategy)
+# keeps base images pinned to fresh digests.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: pip
+    directory: "/services/extractor"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: "/crates/api"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/crates/poller"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/services/extractor"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
