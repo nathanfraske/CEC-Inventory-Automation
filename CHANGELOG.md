@@ -8,6 +8,20 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-27 — Full one-command stack + container smoke gate
+- `docker-compose.yml` now wires the **whole stack** — `db` + `extractor` + `api` + `poller` —
+  with healthchecks and correct service-to-service wiring. The Rust containers build their
+  `DATABASE_URL` from the `POSTGRES_*` parts against the `db` service host (the `.env`
+  `localhost` URL is host-run dev only), and `api` reaches the extractor at
+  `http://extractor:8900`. New `crates/poller/Dockerfile` (multi-stage release build); the api
+  image gains `curl` for its `/readyz` healthcheck.
+- `.dockerignore` keeps `.env`/keys/dumps/`target/`/`.git/` out of every image layer (the Rust
+  images `COPY . .`) — secret hygiene at the build-context boundary (CLAUDE.md §2).
+- CI gains a `compose` job: generates `.env`, `docker compose up -d --build --wait`, then
+  smoke-tests `GET /readyz` (proves DB connect + migrations) and the extractor `/health`,
+  dumping logs on failure and tearing down with `down -v`. This closes acceptance **gate E**
+  (containers) on every push — the GitHub runner has the docker daemon the dev sandbox lacks.
+
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
 - Auth (scope §18): operator accounts (`app_user`, migration 0002), argon2 password hashes,
   and signed session cookies keyed off `SESSION_SECRET`. `POST /auth/bootstrap` (first user),

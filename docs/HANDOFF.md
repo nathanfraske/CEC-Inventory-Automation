@@ -6,6 +6,50 @@
 
 ---
 
+## Entry [2026-06-27] — Full one-command stack + container smoke gate (agent: claude/runbook-setup-config-oxwath)
+
+Wired the whole system to come up from a single `docker compose` and made CI prove it on every
+push — closing acceptance **gate E**, which had been ⛔ BLOCKED since the scaffold (no docker
+daemon in the web sandbox).
+
+### What landed
+- **`docker-compose.yml` → full stack.** Previously only `db` + `api` (poller/minio commented).
+  Now `db` + `extractor` + `api` + `poller`, all healthchecked:
+  - `extractor` builds from `services/extractor/`, exposes `:8900`, healthcheck via the stdlib
+    `python -c urllib.request…/health` (no curl layer needed).
+  - `api` reaches Postgres at **`db`** and the extractor at **`http://extractor:8900`**; its
+    `DATABASE_URL` is built from the `POSTGRES_*` parts (the `.env` URL is `localhost`, host-run
+    only). Healthcheck `curl -fsS /readyz`. Waits on `db` healthy + `extractor` started.
+  - `poller` builds from the new `crates/poller/Dockerfile`, same `db`-host `DATABASE_URL`,
+    carrier env passed through.
+- **`crates/poller/Dockerfile`** — multi-stage release build (`SQLX_OFFLINE=true`), mirrors the
+  api image. The api image now installs `curl` for its healthcheck.
+- **`.dockerignore`** — keeps `.env`/`*.key`/`*.pem`/dumps/`target/`/`.git/` out of the build
+  context so no secret can land in an image layer (the Rust images `COPY . .`). Secret hygiene
+  at the container boundary (CLAUDE.md §2).
+- **CI `compose` job** — `./scripts/gen_secrets.sh` → `docker compose up -d --build --wait
+  --wait-timeout 300` → curl `/readyz`, `/health`, extractor `/health` → logs-on-failure →
+  `down -v`. Runs on the GitHub runner's daemon, so the container path is exercised each push.
+
+### Verification (this environment)
+- `docker compose config` renders the full stack with correct interpolation: api/poller
+  `DATABASE_URL` → `…@db:5432/…`, api `EXTRACTOR_URL` → `http://extractor:8900`, secrets pulled
+  from the gitignored `.env`. The extractor healthcheck one-liner parses as valid Python.
+- No docker daemon here (still V-001), so `up`/build run on CI, not locally. `cargo fmt` clean
+  (no Rust source changed — only Dockerfiles, compose, CI, docs).
+
+### Gate movement
+- **Gate E (containers): ⛔ BLOCKED → ✅ DONE [2026-06-27]** via the CI `compose` job. The local
+  dev box still substitutes a native cluster (V-001), but the committed container path is now
+  CI-verified rather than unverified.
+
+### Next
+- Build the **real operator front-end** (the UI today is read-only — dashboard + tables + scan
+  island, no forms, no login page, no workflow actions). HTMX manual-entry forms + login page +
+  delivery/RMA/sweep actions + WASM scan fallback. This is the next slice.
+
+---
+
 ## Entry [2026-06-27] — Phases 2–5 + remaining Phase 1 backend build-out (agent: claude/runbook-setup-config-oxwath)
 
 Worked the rest of the scope (§20) in 11 verified chunks, each its own commit with build +

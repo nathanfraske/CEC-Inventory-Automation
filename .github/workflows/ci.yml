@@ -54,3 +54,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+
+  # Brings the whole stack up with `docker compose` exactly as a real box would, waits for
+  # every healthcheck to pass, and smoke-tests the integration seams: the API /readyz (which
+  # proves it connected to Postgres and ran migrations) and the extractor /health. This is
+  # the one-command integrated-stack gate; it runs on the GitHub runner's docker daemon since
+  # the dev sandbox has none (DECISIONS V-001).
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: generate .env (secrets for the compose interpolation)
+        run: ./scripts/gen_secrets.sh
+      - name: build + start the stack, wait for health
+        run: docker compose up -d --build --wait --wait-timeout 300
+      - name: smoke-test the seams
+        run: |
+          set -euo pipefail
+          echo "API /readyz:";      curl -fsS http://127.0.0.1:8080/readyz; echo
+          echo "API /health:";      curl -fsS http://127.0.0.1:8080/health; echo
+          echo "extractor /health:"; curl -fsS http://127.0.0.1:8900/health; echo
+      - name: dump logs on failure
+        if: failure()
+        run: docker compose ps && docker compose logs --no-color
+      - name: tear down (remove volumes)
+        if: always()
+        run: docker compose down -v

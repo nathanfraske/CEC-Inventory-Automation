@@ -1,6 +1,10 @@
 # CEC Inventory single-box stack. Reads .env (gitignored). Never commit .env.
 # Ports bind to 127.0.0.1 only; reach the app over the Headscale mesh, not a public bind.
 # See SECRETS-AND-DATABASE.md for the Docker-secrets variant (POSTGRES_PASSWORD_FILE).
+#
+# The Rust services run inside the compose network, so they reach Postgres at host `db`
+# (not the `localhost` DATABASE_URL in .env, which is for host-run dev). Each container
+# therefore builds its own DATABASE_URL from the POSTGRES_* parts with host `db`.
 name: cec-inventory
 
 services:
@@ -21,37 +25,67 @@ services:
       retries: 10
     restart: unless-stopped
 
+  extractor:
+    build:
+      context: ./services/extractor
+      dockerfile: Dockerfile
+    environment:
+      # Reserved for the inference-box image (model paths, device); the base app needs none.
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "127.0.0.1:8900:8900"
+    healthcheck:
+      # python is always present in the image; avoids adding curl to the extractor layer.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8900/health').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   api:
     build:
       context: .
       dockerfile: crates/api/Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      # Container reaches Postgres at the `db` service host, not the .env localhost.
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       API_BIND: ${API_BIND}
       SESSION_SECRET: ${SESSION_SECRET}
       RUST_LOG: ${RUST_LOG}
       STORAGE_BACKEND: ${STORAGE_BACKEND}
       STORAGE_FS_ROOT: ${STORAGE_FS_ROOT}
-      EXTRACTOR_URL: ${EXTRACTOR_URL}
+      EXTRACTOR_URL: http://extractor:8900
     depends_on:
       db:
         condition: service_healthy
+      extractor:
+        condition: service_started
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
       - objects:/var/lib/cec-inventory/objects
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/readyz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
 
-  # poller:
-  #   build: { context: ., dockerfile: crates/poller/Dockerfile }
-  #   environment:
-  #     DATABASE_URL: ${DATABASE_URL}
-  #     CARRIER_PROVIDER: ${CARRIER_PROVIDER}
-  #     CARRIER_API_KEY: ${CARRIER_API_KEY}
-  #     CARRIER_API_SECRET: ${CARRIER_API_SECRET}
-  #     SHIPMENT_POLL_INTERVAL_SECS: ${SHIPMENT_POLL_INTERVAL_SECS}
-  #   depends_on: { db: { condition: service_healthy } }
-  #   restart: unless-stopped
+  poller:
+    build:
+      context: .
+      dockerfile: crates/poller/Dockerfile
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      RUST_LOG: ${RUST_LOG}
+      CARRIER_PROVIDER: ${CARRIER_PROVIDER}
+      CARRIER_API_KEY: ${CARRIER_API_KEY}
+      CARRIER_API_SECRET: ${CARRIER_API_SECRET}
+      SHIPMENT_POLL_INTERVAL_SECS: ${SHIPMENT_POLL_INTERVAL_SECS}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
 
   # minio:   # enable only when STORAGE_BACKEND=minio
   #   image: minio/minio

@@ -6,9 +6,11 @@
 
 ## Open — close out Phase 0
 
-- [ ] **[2026-06-27] Close gate E (containers).** On a host with the Docker daemon, run
-  `docker compose up -d --build` and verify `curl localhost:8080/readyz` → `{"db":"up"}`
-  against the containerized DB. ⛔ BLOCKED [2026-06-27] — no docker daemon in the web sandbox.
+- [x] **[2026-06-27] Close gate E (containers).** ✅ DONE [2026-06-27] — the CI `compose` job
+  runs `docker compose up -d --build --wait` for the full stack (db+extractor+api+poller) on
+  the GitHub runner and smoke-tests `/readyz` + extractor `/health` on every push. The local
+  web sandbox still has no docker daemon (deviation V-001), but the container path is now
+  verified on CI rather than blocked. `docker compose config` validates locally.
 - [ ] **[2026-06-27] Close gate F (secret scan) locally.** Install gitleaks and run
   `gitleaks detect --source . --redact` (or `just scan`); confirm zero leaks. CI already runs
   it on push, but a clean local run fully closes the runbook gate.

@@ -1,0 +1,24 @@
+# Keep secrets and bulk out of the Docker build context (the Rust images do `COPY . .`).
+# Secret hygiene first: .env must NEVER enter an image layer (CLAUDE.md §2, SECRETS-AND-DATABASE.md).
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+
+# Build artifacts and VCS — large and unneeded inside the build.
+target/
+.git/
+.github/
+
+# Local data / object store / DB dumps — never bake into an image.
+data/
+pgdata/
+*.dump
+*.sql.gz
+
+# Python extractor local cruft (its build context is services/extractor/).
+**/__pycache__/
+**/*.pyc
+.venv/
