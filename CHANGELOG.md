@@ -8,6 +8,16 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Security — 2026-06-27 — Audit remediation batch 3: auth/access hardening
+- **Session TTL:** the signed cookie now carries its issue time; sessions expire after 12 h
+  (absolute), enforced in `require_auth`/`me`. Old timestamp-less cookies read as expired.
+- **Login throttle:** an in-memory per-username counter locks an account after 10 consecutive
+  failures for 15 min (429), cleared on success — a brute-force speed-bump for the mesh deploy.
+- **RBAC:** new `app_user.role` (migration 0004); the bootstrap account is `admin`, others
+  default to `operator`. `POST /auth/users` is gated behind a `require_admin` middleware
+  (operators get 403). `/auth/me` now returns the role. New 403/429 `ApiError` variants.
+- Auth integration test extended to assert admin-creates-operator and operator-cannot-create.
+
 ### Security — 2026-06-27 — Audit remediation batch 2: DB-integrity guards
 - **System-gating TOCTOU fixed:** a `lock_system` helper row-locks the `system` (`FOR UPDATE`)
   as the first statement inside the tx for add/remove member, validate, deliver, sweep, transfer;

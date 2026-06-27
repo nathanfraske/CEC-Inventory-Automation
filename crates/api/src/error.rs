@@ -10,6 +10,8 @@ pub enum ApiError {
     NotFound(String),
     BadRequest(String),
     Unauthorized(String),
+    Forbidden(String),
+    TooManyRequests(String),
     Upstream(String),
     Db(sqlx::Error),
     Internal(anyhow::Error),
@@ -38,6 +40,8 @@ impl IntoResponse for ApiError {
             ApiError::NotFound(m) => (StatusCode::NOT_FOUND, m),
             ApiError::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
             ApiError::Unauthorized(m) => (StatusCode::UNAUTHORIZED, m),
+            ApiError::Forbidden(m) => (StatusCode::FORBIDDEN, m),
+            ApiError::TooManyRequests(m) => (StatusCode::TOO_MANY_REQUESTS, m),
             ApiError::Upstream(m) => (StatusCode::BAD_GATEWAY, m),
             ApiError::Db(e) => {
                 // Surface constraint violations as actionable 4xx; everything else is 500.

@@ -35,6 +35,8 @@ pub struct AppState {
     pub storage_root: Arc<PathBuf>,
     /// Signing key for session cookies, derived from `SESSION_SECRET`.
     pub cookie_key: Key,
+    /// In-memory failed-login counter for the brute-force throttle (scope §18 hardening).
+    pub login_throttle: auth::LoginThrottle,
 }
 
 // Lets the `SignedCookieJar` extractor pull the signing key out of the app state.
@@ -62,7 +64,8 @@ pub async fn build_state() -> anyhow::Result<AppState> {
     // embeds the migration files at COMPILE time and does not reliably re-embed when a new
     // migration is added on stable Rust — touch this file (or `cargo clean -p cec-inventory-api`)
     // so the macro re-reads the directory. Current set: 0001 init, 0002 app_user,
-    // 0003 integrity_hardening (serial/asset-tag uniqueness + append-only triggers).
+    // 0003 integrity_hardening (serial/asset-tag uniqueness + append-only triggers),
+    // 0004 app_user_role (RBAC).
     sqlx::migrate!("../../migrations").run(&db).await?;
 
     // Cookie signing key from SESSION_SECRET. Fail closed (like DATABASE_URL): no baked-in
@@ -80,6 +83,9 @@ pub async fn build_state() -> anyhow::Result<AppState> {
         db,
         storage_root: Arc::new(storage_root),
         cookie_key,
+        login_throttle: std::sync::Arc::new(
+            std::sync::Mutex::new(std::collections::HashMap::new()),
+        ),
     })
 }
 
@@ -92,11 +98,21 @@ pub fn app(state: AppState) -> Router {
 /// mutation routes, optionally wrapped in the auth middleware (scope §18). `require_auth`
 /// is `false` only for the non-auth integration tests.
 pub fn build_app(state: AppState, require_auth: bool) -> Router {
-    let mut protected = routes::router().route("/auth/users", post(auth::create_user));
+    let mut protected = routes::router();
     if require_auth {
         protected = protected.route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,
+        ));
+    }
+
+    // Operator creation is the privilege-escalation surface — gate it behind `require_admin`
+    // (which does its own session check), kept separate from the operator-level routes.
+    let mut admin = Router::new().route("/auth/users", post(auth::create_user));
+    if require_auth {
+        admin = admin.route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_admin,
         ));
     }
 
@@ -110,6 +126,7 @@ pub fn build_app(state: AppState, require_auth: bool) -> Router {
     // raise this per-route in routes::router() (photos exceed 1 MiB); the inner route limit wins.
     public
         .merge(protected)
+        .merge(admin)
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .with_state(state)
 }

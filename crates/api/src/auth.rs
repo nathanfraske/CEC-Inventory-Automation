@@ -3,6 +3,10 @@
 //! API data/mutation routes are wrapped with `require_auth`; `/health`, `/readyz`, `/auth/*`,
 //! and the read-only UI stay public.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
@@ -20,6 +24,39 @@ use crate::error::{ApiError, ApiResult};
 use crate::AppState;
 
 pub const SESSION_COOKIE: &str = "cec_session";
+/// Sessions expire this long after issue (absolute). The signed cookie carries the issue time.
+pub const SESSION_TTL_SECS: u64 = 12 * 3600;
+/// Login throttle: lock a username after this many consecutive failures, for this long.
+const MAX_LOGIN_FAILS: u32 = 10;
+const LOGIN_LOCKOUT: Duration = Duration::from_secs(900);
+
+/// Per-username failed-login state for the in-memory login throttle (resets on restart — a
+/// pragmatic brute-force speed-bump for the thin mesh deployment, not a distributed limiter).
+#[derive(Default)]
+pub struct LoginAttempt {
+    fails: u32,
+    locked_until: Option<Instant>,
+}
+pub type LoginThrottle = Arc<Mutex<HashMap<String, LoginAttempt>>>;
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Parse the signed session cookie (`<uuid>|<issued_unix>`) and return the user id only if the
+/// session has not exceeded `SESSION_TTL_SECS`. Old cookies without a timestamp read as expired.
+fn session_user(jar: &SignedCookieJar) -> Option<Uuid> {
+    let raw = jar.get(SESSION_COOKIE)?;
+    let (uid, issued) = raw.value().split_once('|')?;
+    let issued: u64 = issued.parse().ok()?;
+    if now_unix().saturating_sub(issued) > SESSION_TTL_SECS {
+        return None;
+    }
+    Uuid::parse_str(uid).ok()
+}
 
 #[derive(Deserialize)]
 pub struct Credentials {
@@ -53,7 +90,8 @@ fn dummy_hash() -> &'static str {
 }
 
 fn session_cookie(user_id: Uuid) -> Cookie<'static> {
-    Cookie::build((SESSION_COOKIE, user_id.to_string()))
+    // Value carries the issue time so the session has an absolute TTL (see `session_user`).
+    Cookie::build((SESSION_COOKIE, format!("{user_id}|{}", now_unix())))
         .path("/")
         .http_only(true)
         .same_site(SameSite::Lax)
@@ -81,15 +119,19 @@ pub async fn bootstrap(
         ));
     }
     let hash = hash_password(&c.password)?;
-    sqlx::query("INSERT INTO app_user (username, password_hash) VALUES ($1,$2)")
+    // The first account is an admin (it can create the rest).
+    sqlx::query("INSERT INTO app_user (username, password_hash, role) VALUES ($1,$2,'admin')")
         .bind(c.username.trim())
         .bind(hash)
         .execute(&s.db)
         .await?;
-    Ok(Json(json!({ "ok": true, "username": c.username.trim() })))
+    Ok(Json(
+        json!({ "ok": true, "username": c.username.trim(), "role": "admin" }),
+    ))
 }
 
-/// Create an operator (must already be authenticated — sits behind `require_auth`).
+/// Create an operator (admin-only — sits behind `require_admin`). New accounts are `operator`
+/// (the column default); promote to admin out-of-band if needed.
 pub async fn create_user(
     State(s): State<AppState>,
     Json(c): Json<Credentials>,
@@ -108,11 +150,35 @@ pub async fn create_user(
     Ok(Json(json!({ "ok": true, "username": c.username.trim() })))
 }
 
+/// True if the username is currently locked out (and not yet expired).
+fn is_locked(throttle: &LoginThrottle, username: &str) -> bool {
+    let map = throttle.lock().unwrap();
+    map.get(username)
+        .and_then(|a| a.locked_until)
+        .map(|until| until > Instant::now())
+        .unwrap_or(false)
+}
+
+fn record_login_failure(throttle: &LoginThrottle, username: &str) {
+    let mut map = throttle.lock().unwrap();
+    let a = map.entry(username.to_string()).or_default();
+    a.fails += 1;
+    if a.fails >= MAX_LOGIN_FAILS {
+        a.locked_until = Some(Instant::now() + LOGIN_LOCKOUT);
+    }
+}
+
 pub async fn login(
     State(s): State<AppState>,
     jar: SignedCookieJar,
     Json(c): Json<Credentials>,
 ) -> ApiResult<(SignedCookieJar, Json<Value>)> {
+    // Brute-force speed-bump: refuse while locked out (constant cost, no DB/argon2 work).
+    if is_locked(&s.login_throttle, &c.username) {
+        return Err(ApiError::TooManyRequests(
+            "too many failed logins; try again later".into(),
+        ));
+    }
     let row: Option<(Uuid, String)> =
         sqlx::query_as("SELECT id, password_hash FROM app_user WHERE username = $1")
             .bind(&c.username)
@@ -124,12 +190,16 @@ pub async fn login(
             // Verify against a fixed dummy hash so the unknown-user path costs the same as a
             // wrong-password path (no timing-based username enumeration).
             verify_password(&c.password, dummy_hash());
+            record_login_failure(&s.login_throttle, &c.username);
             return Err(ApiError::Unauthorized("invalid credentials".into()));
         }
     };
     if !verify_password(&c.password, &hash) {
+        record_login_failure(&s.login_throttle, &c.username);
         return Err(ApiError::Unauthorized("invalid credentials".into()));
     }
+    // Success clears the failure counter.
+    s.login_throttle.lock().unwrap().remove(&c.username);
     Ok((
         jar.add(session_cookie(id)),
         Json(json!({ "ok": true, "username": c.username })),
@@ -142,23 +212,22 @@ pub async fn logout(jar: SignedCookieJar) -> (SignedCookieJar, Json<Value>) {
     (jar.remove(removal), Json(json!({ "ok": true })))
 }
 
-/// Current session, or 401. Reads the signed cookie directly (no middleware needed).
+/// Current session, or 401. Reads the signed cookie directly (TTL-checked, no middleware).
 pub async fn me(State(s): State<AppState>, jar: SignedCookieJar) -> ApiResult<Json<Value>> {
-    let uid = jar
-        .get(SESSION_COOKIE)
-        .and_then(|c| Uuid::parse_str(c.value()).ok())
-        .ok_or_else(|| ApiError::Unauthorized("not logged in".into()))?;
-    let username: Option<String> =
-        sqlx::query_scalar("SELECT username FROM app_user WHERE id = $1")
+    let uid = session_user(&jar).ok_or_else(|| ApiError::Unauthorized("not logged in".into()))?;
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT username, role FROM app_user WHERE id = $1")
             .bind(uid)
             .fetch_optional(&s.db)
             .await?;
-    let username = username.ok_or_else(|| ApiError::Unauthorized("not logged in".into()))?;
-    Ok(Json(json!({ "username": username, "user_id": uid })))
+    let (username, role) = row.ok_or_else(|| ApiError::Unauthorized("not logged in".into()))?;
+    Ok(Json(
+        json!({ "username": username, "user_id": uid, "role": role }),
+    ))
 }
 
-/// Middleware: require a valid signed session for the wrapped routes. The jar is rebuilt
-/// from the request headers with the state's key (rather than relying on the extractor
+/// Middleware: require a valid, unexpired signed session for the wrapped routes. The jar is
+/// rebuilt from the request headers with the state's key (rather than relying on the extractor
 /// inside `from_fn_with_state`).
 pub async fn require_auth(
     State(s): State<AppState>,
@@ -166,9 +235,7 @@ pub async fn require_auth(
     next: Next,
 ) -> Result<Response, ApiError> {
     let jar = SignedCookieJar::from_headers(req.headers(), s.cookie_key.clone());
-    let uid = jar
-        .get(SESSION_COOKIE)
-        .and_then(|c| Uuid::parse_str(c.value()).ok())
+    let uid = session_user(&jar)
         .ok_or_else(|| ApiError::Unauthorized("authentication required".into()))?;
     let exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM app_user WHERE id = $1")
         .bind(uid)
@@ -178,6 +245,27 @@ pub async fn require_auth(
         return Err(ApiError::Unauthorized("authentication required".into()));
     }
     Ok(next.run(req).await)
+}
+
+/// Middleware: require a valid session whose user has the `admin` role (privilege-escalation
+/// surface — creating operators). Operators get 403.
+pub async fn require_admin(
+    State(s): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    let jar = SignedCookieJar::from_headers(req.headers(), s.cookie_key.clone());
+    let uid = session_user(&jar)
+        .ok_or_else(|| ApiError::Unauthorized("authentication required".into()))?;
+    let role: Option<String> = sqlx::query_scalar("SELECT role FROM app_user WHERE id = $1")
+        .bind(uid)
+        .fetch_optional(&s.db)
+        .await?;
+    match role.as_deref() {
+        Some("admin") => Ok(next.run(req).await),
+        Some(_) => Err(ApiError::Forbidden("admin role required".into())),
+        None => Err(ApiError::Unauthorized("authentication required".into())),
+    }
 }
 
 /// Public auth routes (login/bootstrap/logout/me).

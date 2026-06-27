@@ -1724,6 +1724,7 @@ async fn auth_bootstrap_login_protect_logout() {
         .await
         .unwrap();
     assert_eq!(me["username"], "op1");
+    assert_eq!(me["role"], "admin"); // the bootstrap account is admin
 
     let units = c.get(format!("{base}/units")).send().await.unwrap();
     assert!(
@@ -1731,6 +1732,56 @@ async fn auth_bootstrap_login_protect_logout() {
         "authed units status {}",
         units.status()
     );
+
+    // RBAC: admin can create an operator via /auth/users.
+    let mk = c
+        .post(format!("{base}/auth/users"))
+        .json(&json!({ "username": "op-worker", "password": "operator-pass-12" }))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        mk.status().is_success(),
+        "admin create_user: {}",
+        mk.status()
+    );
+
+    // The new operator can log in but is NOT an admin → creating users is 403.
+    let op = reqwest::Client::builder()
+        .cookie_store(true)
+        .build()
+        .unwrap();
+    let oplogin = op
+        .post(format!("{base}/auth/login"))
+        .json(&json!({ "username": "op-worker", "password": "operator-pass-12" }))
+        .send()
+        .await
+        .unwrap();
+    assert!(oplogin.status().is_success());
+    let opme: Value = op
+        .get(format!("{base}/auth/me"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(opme["role"], "operator");
+    let forbidden = op
+        .post(format!("{base}/auth/users"))
+        .json(&json!({ "username": "op-sneaky", "password": "operator-pass-12" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), 403, "operator must not create users");
+    // …but an operator can still do operator-level work.
+    assert!(op
+        .get(format!("{base}/units"))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
 
     // Logout clears the session.
     c.post(format!("{base}/auth/logout")).send().await.unwrap();
