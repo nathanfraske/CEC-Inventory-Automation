@@ -9,6 +9,10 @@ dating + tombstoning conventions that govern the memory documents.
 ## [Unreleased]
 
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- Operator UI (scope §18 path 1): server-rendered dashboard (`/`) with live counts and
+  `/ui/units`, `/ui/systems`, `/ui/purchases` tables (no template-engine dep), plus a
+  camera/barcode scan island (`/ui/scan/{unit_id}`) that posts to the verify endpoint
+  (native BarcodeDetector; WASM fallback + long-receipt capture are a later pass).
 - Python extractor service (scope §11): `services/extractor` FastAPI app — `/health`,
   `/extract` (deterministic template fast-path for known vendors incl. per-line serials, VLM
   fallback stubbed), `/stitch` placeholder. Pure-stdlib `extractor.py` with tests; Dockerfile;

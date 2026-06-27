@@ -18,6 +18,7 @@ pub mod scan;
 pub mod shipments;
 pub mod stock;
 pub mod systems;
+pub mod ui;
 pub mod units;
 pub mod warranty;
 
@@ -123,4 +124,11 @@ pub fn router() -> Router<AppState> {
         .route("/export/units.csv", get(reports::export_units_csv))
         // receipt extraction (proxies the Python extractor service, scope §11)
         .route("/extract-preview", post(crate::extractor::extract_preview))
+        // operator UI (server-rendered, scope §18 path 1)
+        .route("/", get(ui::dashboard))
+        .route("/ui/units", get(ui::units_page))
+        .route("/ui/systems", get(ui::systems_page))
+        .route("/ui/purchases", get(ui::purchases_page))
+        .route("/ui/scan", get(ui::scan_index))
+        .route("/ui/scan/{unit_id}", get(ui::scan_page))
 }

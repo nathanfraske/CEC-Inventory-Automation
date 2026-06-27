@@ -1332,3 +1332,50 @@ async fn phase1_extract_preview_502_when_unreachable() {
         .unwrap();
     assert_eq!(resp.status(), 502);
 }
+
+#[tokio::test]
+async fn ui_pages_render() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+
+    let dash = c.get(format!("{base}/")).send().await.unwrap();
+    assert!(dash
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("text/html"));
+    let html = dash.text().await.unwrap();
+    assert!(html.contains("CEC Inventory"));
+    assert!(html.contains("Dashboard"));
+
+    for (path, marker) in [
+        ("/ui/units", "<h1>Units</h1>"),
+        ("/ui/systems", "<h1>Systems</h1>"),
+        ("/ui/purchases", "<h1>Purchases</h1>"),
+    ] {
+        let body = c
+            .get(format!("{base}{path}"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(body.contains(marker), "{path} missing {marker}");
+    }
+
+    // The scan island embeds the unit id and the BarcodeDetector path.
+    let uid = uuid::Uuid::new_v4();
+    let scan = c
+        .get(format!("{base}/ui/scan/{uid}"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(scan.contains("BarcodeDetector"));
+    assert!(scan.contains(&uid.to_string()));
+}
