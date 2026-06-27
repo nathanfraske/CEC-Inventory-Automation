@@ -6,6 +6,47 @@
 
 ---
 
+## Entry [2026-06-27] — Phase 0 CRUD: manual entry + receipt upload + event logging (agent: claude/runbook-setup-config-oxwath)
+
+Built the "usable day one" manual-entry surface the scope's Phase 0 calls for (scope §20),
+on top of the spine. The API crate is now a lib+bin (`src/lib.rs` exposes `build_state`/`app`
+so the integration test drives the real router).
+
+### What landed
+- **Catalog/reference:** `POST/GET /vendors`, `GET /vendors/{id}`; `POST/GET /manufacturers`;
+  `POST/GET /products`, `GET /products/{id}`.
+- **Purchases (lots):** `POST /purchases` (creates the purchase + its line items in one
+  transaction), `GET /purchases`, `GET /purchases/{id}` (with line items),
+  `POST /purchases/{id}/line-items`, and `POST /purchases/{id}/receipt` (multipart upload to
+  the filesystem object store → appends a ref to `receipt_files`).
+- **Serialized units:** `POST /units` (writes an `intake` `unit_event`), `GET /units`,
+  `GET /units/{id}`, `PATCH /units/{id}/status` (writes a `status_change` event with from/to),
+  `GET /units/{id}/events` (the unit's event timeline).
+- **Bulk stock:** `POST/GET /stock`, `POST /stock/{id}/adjust` (signed delta, guarded so
+  on-hand never goes negative).
+- **Event logging (scope §16):** `crates/api/src/events.rs::log_unit_event` writes a
+  `unit_event` row inside the same transaction as the mutation it records.
+- New domain enums in `crates/domain` (source_type, resolution_status, serial_source,
+  condition_kind, acquisition_method, unit_status, unit_event_type). Money is
+  `numeric(12,2)` ↔ `rust_decimal::Decimal`, sent/received as JSON strings.
+
+### Verification (this environment)
+- `cargo build --workspace`, `cargo fmt --all -- --check`, and `clippy -D warnings` all clean.
+- Integration test `crates/api/tests/api.rs` (spawns the app on an ephemeral port, exercises
+  the whole loop) **passes** against the live local cluster: it asserts the intake +
+  status_change events, the appended receipt file, the guarded stock adjustment, and 404s.
+  Direct DB check confirmed the two `unit_event` rows (`intake`→in_stock, `status_change`
+  in_stock→reserved) and `receipt_files` length 1.
+- The test self-skips when `DATABASE_URL` is unset, so CI (DB-free `cargo build`) stays green;
+  data access still uses runtime SQLx queries, so no `.sqlx/` is required yet.
+
+### Still open for Phase 0 / next
+- No HTMX UI yet (scope §18 path 1) — API + JSON only. Minimal operator UI is the next slice.
+- Compile-time-checked queries + committed `.sqlx/`, and a Postgres service in CI to actually
+  run the integration test, are follow-ups (see `docs/TODO.md`, `docs/DECISIONS.md` D-010).
+
+---
+
 ## Entry [2026-06-27] — Phase 0 scaffold stood up from the seed (agent: claude/runbook-setup-config-oxwath)
 
 Executed `AGENT_RUNBOOK.md` end to end against the seed package, plus set up the

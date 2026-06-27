@@ -8,6 +8,18 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-27 — Phase 0 manual-entry CRUD
+- Catalog/reference endpoints: vendors, manufacturers, products.
+- Purchases with line items (created in one transaction), receipt-file upload to the
+  filesystem object store (`POST /purchases/{id}/receipt`, appended to `receipt_files`).
+- Serialized units with `unit_event` logging on every mutation: creation writes `intake`,
+  `PATCH /units/{id}/status` writes `status_change`; `GET /units/{id}/events` returns the
+  timeline (scope §16).
+- Bulk stock create + guarded quantity adjustment (`POST /stock/{id}/adjust`).
+- The api crate is now lib+bin (`src/lib.rs`); new domain enums in `crates/domain`; money via
+  `rust_decimal::Decimal`; an integration test (`crates/api/tests/api.rs`) that drives the full
+  flow against a live DB (self-skips without `DATABASE_URL`, so CI stays DB-free).
+
 ### Added — 2026-06-27 — Phase 0 scaffold
 - Cargo workspace spine: `crates/api` (Axum, `/health` + `/readyz`), `crates/poller`
   (shipment-worker stub), `crates/domain` (enum types).

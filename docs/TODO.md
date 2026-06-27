@@ -17,6 +17,16 @@
   this environment; the CI `secret-scan` job is the active backstop until then.
 - [ ] **[2026-06-27] Verify CI is green on first push.** Confirm the `secret-scan` and `rust`
   jobs pass (`fmt --check`, `clippy -D warnings`, `build` with `SQLX_OFFLINE=true`).
+  ✅ DONE [2026-06-27] — green on head `81960f6` after the gitleaks `GITHUB_TOKEN` fix.
+- [ ] **[2026-06-27] Minimal operator UI for the Phase 0 CRUD.** HTMX + server-render (scope
+  §18 path 1) over the existing endpoints: manual purchase/unit/bulk entry, receipt upload, the
+  unit event timeline. The API + JSON exist; this is the "usable day one" front end.
+- [ ] **[2026-06-27] Migrate to compile-time-checked SQLx queries + commit `.sqlx/`.** Convert
+  the runtime `query`/`query_as` calls to `query!`/`query_as!`, run `just prepare`, commit the
+  cache (scope INV-OQ-1; see `docs/DECISIONS.md` D-010).
+- [ ] **[2026-06-27] Run the integration test in CI.** Add a Postgres service to the `rust`
+  job, run migrations, and `cargo test` so `crates/api/tests/api.rs` executes in CI (today it
+  self-skips without `DATABASE_URL`).
 
 ## Open — Phase 1 (receipt capture, extraction, cost, order tracking) — scope §20
 
@@ -62,3 +72,6 @@
 - ✅ DONE [2026-06-27] Set up configuration hooks (git pre-commit secret-scan + Claude Code
   SessionStart) and the memory documents (CLAUDE.md, HANDOFF, TODO, DECISIONS, CHANGELOG) with
   the dating/tombstoning convention. → `CLAUDE.md` §3–§4.
+- ✅ DONE [2026-06-27] Phase 0 manual-entry CRUD: purchases + line items, serialized units,
+  bulk stock, receipt-file upload to the object store, and `unit_event` logging on every unit
+  mutation, with an integration test. → `docs/HANDOFF.md` entry [2026-06-27] (CRUD).
