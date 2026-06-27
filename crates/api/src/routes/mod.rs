@@ -128,7 +128,12 @@ pub fn router() -> Router<AppState> {
             "/purchases/from-extraction",
             post(crate::extractor::create_from_extraction),
         )
-        // operator UI (server-rendered, scope §18 path 1)
+}
+
+/// Public, read-only server-rendered UI (scope §18 path 1). Kept outside the auth-protected
+/// data routes; a production deploy puts the whole app behind the Headscale mesh + login.
+pub fn ui_router() -> Router<AppState> {
+    Router::new()
         .route("/", get(ui::dashboard))
         .route("/ui/units", get(ui::units_page))
         .route("/ui/systems", get(ui::systems_page))

@@ -14,6 +14,24 @@ async fn spawn() -> Option<String> {
     std::env::set_var("STORAGE_FS_ROOT", &dir);
 
     let state = cec_inventory_api::build_state().await.expect("build_state");
+    // Auth off for the resource-route tests; the auth flow has its own spawn below.
+    let app = cec_inventory_api::build_app(state, false);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    Some(format!("http://{addr}"))
+}
+
+/// Spawn the app with auth enabled (production wiring) for the auth flow test.
+async fn spawn_authed() -> Option<String> {
+    if std::env::var("DATABASE_URL").is_err() {
+        return None;
+    }
+    let dir = std::env::temp_dir().join(format!("cec-test-objects-{}", uuid::Uuid::new_v4()));
+    std::env::set_var("STORAGE_FS_ROOT", &dir);
+    let state = cec_inventory_api::build_state().await.expect("build_state");
     let app = cec_inventory_api::app(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -1427,4 +1445,91 @@ Subtotal $1618.98\nTax $133.57\nTotal $1752.55\n";
     assert_eq!(lines.len(), 2);
     // Lines come back unresolved for the operator to map + scan into units.
     assert!(lines.iter().all(|l| l["resolution_status"] == "unresolved"));
+}
+
+#[tokio::test]
+async fn auth_bootstrap_login_protect_logout() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return;
+    };
+    // spawn_authed() runs migrations (creating app_user); then clear accounts for a
+    // deterministic bootstrap.
+    let Some(base) = spawn_authed().await else {
+        return;
+    };
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .connect(&url)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM app_user")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Unauthenticated access to a protected route is rejected.
+    let anon = reqwest::Client::new();
+    let r = anon.get(format!("{base}/units")).send().await.unwrap();
+    assert_eq!(r.status(), 401);
+
+    // Bootstrap the first operator.
+    let boot = anon
+        .post(format!("{base}/auth/bootstrap"))
+        .json(&json!({ "username": "op1", "password": "supersecret" }))
+        .send()
+        .await
+        .unwrap();
+    assert!(boot.status().is_success(), "bootstrap: {}", boot.status());
+
+    // A second bootstrap is refused.
+    let boot2 = anon
+        .post(format!("{base}/auth/bootstrap"))
+        .json(&json!({ "username": "op2", "password": "supersecret" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(boot2.status(), 400);
+
+    // Wrong password → 401.
+    let bad = anon
+        .post(format!("{base}/auth/login"))
+        .json(&json!({ "username": "op1", "password": "nope" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 401);
+
+    // Login with a cookie-storing client, then the session unlocks protected routes.
+    let c = reqwest::Client::builder()
+        .cookie_store(true)
+        .build()
+        .unwrap();
+    let login = c
+        .post(format!("{base}/auth/login"))
+        .json(&json!({ "username": "op1", "password": "supersecret" }))
+        .send()
+        .await
+        .unwrap();
+    assert!(login.status().is_success());
+
+    let me: Value = c
+        .get(format!("{base}/auth/me"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(me["username"], "op1");
+
+    let units = c.get(format!("{base}/units")).send().await.unwrap();
+    assert!(
+        units.status().is_success(),
+        "authed units status {}",
+        units.status()
+    );
+
+    // Logout clears the session.
+    c.post(format!("{base}/auth/logout")).send().await.unwrap();
+    let after = c.get(format!("{base}/units")).send().await.unwrap();
+    assert_eq!(after.status(), 401);
 }

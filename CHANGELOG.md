@@ -9,6 +9,11 @@ dating + tombstoning conventions that govern the memory documents.
 ## [Unreleased]
 
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- Auth (scope §18): operator accounts (`app_user`, migration 0002), argon2 password hashes,
+  and signed session cookies keyed off `SESSION_SECRET`. `POST /auth/bootstrap` (first user),
+  `/auth/login`, `/auth/logout`, `/auth/me`, `/auth/users` (authenticated). The data/mutation
+  routes are wrapped in `require_auth`; `/health`, `/readyz`, `/auth/*`, and the read-only UI
+  stay public. Sits behind the Headscale mesh (enable cookie `Secure` under TLS).
 - Receipt→inventory loop (scope §3): `POST /purchases/from-extraction` calls the extractor and
   persists a draft purchase + unresolved line items (storing the raw payload on
   `purchase.raw_extract`) for operator resolution → units. Verified end-to-end against a live
