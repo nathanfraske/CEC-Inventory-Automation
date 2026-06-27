@@ -9,7 +9,7 @@
 
 | # | Date | Decision | Resolves | Rationale |
 |---|---|---|---|---|
-| D-001 | 2026-06-27 | Backend = Rust + Axum; data access via SQLx (compile-time-checked queries). | INV-OQ-1 | Leaner than SeaORM; fits the verification posture. |
+| D-001 | 2026-06-27 | Backend = Rust + Axum; data access via SQLx. (Phase 0 uses runtime queries only; compile-time-checked `query!`/`query_as!` queries and the committed `.sqlx/` cache arrive in Phase 1.) | INV-OQ-1 | Leaner than SeaORM; fits the verification posture. |
 | D-002 | 2026-06-27 | Database = PostgreSQL 16. | — | Relational fits inventory; JSONB for raw extract / event detail / carrier payloads. |
 | D-003 | 2026-06-27 | Object storage = filesystem behind the API; MinIO is a drop-in later. | INV-OQ-2 | Simplest for one box; `STORAGE_BACKEND` flips it. |
 | D-004 | 2026-06-27 | Frontend = Axum server-render + HTMX + small JS islands (camera/scan). Scaffold ships API + health spine only; UI is Phase 1+. | INV-OQ-3 | Least total code; camera/scan are the only places the choice bites. |

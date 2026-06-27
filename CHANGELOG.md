@@ -1,5 +1,7 @@
 # Changelog
 
+> Last updated: 2026-06-27
+
 All notable changes to this repository are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); dates are ISO-8601. See `CLAUDE.md` §3 for the
 dating + tombstoning conventions that govern the memory documents.
@@ -24,6 +26,9 @@ dating + tombstoning conventions that govern the memory documents.
   `SECRETS-AND-DATABASE.md`, `README.md`.
 
 ### Notes
-- Acceptance gates A–D verified in this environment; gate E (containers) and a local gitleaks
-  run for gate F are infra-blocked in the web sandbox — see `docs/HANDOFF.md` entry
-  [2026-06-27].
+- Acceptance gates A–D verified in this environment (the DB was a native Postgres 16 cluster
+  rather than `docker compose up -d db`, since the sandbox has no docker daemon — deviation
+  V-001 in `docs/DECISIONS.md`). Gate E (containers) is ⛔ BLOCKED — no docker daemon. Gate F
+  is ◐ PARTIAL — the commit succeeded with `.env` unstaged/ignored, but the local gitleaks run
+  is outstanding (deviation V-002; the CI `secret-scan` job is the active backstop). Full,
+  authoritative gate table: `docs/HANDOFF.md` entry [2026-06-27].

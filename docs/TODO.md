@@ -11,8 +11,10 @@
   against the containerized DB. ⛔ BLOCKED [2026-06-27] — no docker daemon in the web sandbox.
 - [ ] **[2026-06-27] Close gate F (secret scan) locally.** Install gitleaks and run
   `gitleaks detect --source . --redact` (or `just scan`); confirm zero leaks. CI already runs
-  it on push, but a clean local run fully closes the runbook gate. (Local install was denied in
-  this environment; CI is the active backstop in the meantime.)
+  it on push, but a clean local run fully closes the runbook gate.
+  ◐ PARTIAL [2026-06-27] — commit succeeded and `.env` is unstaged/ignored (two of the three
+  gate conditions met); only the local gitleaks run is outstanding. Local install was denied in
+  this environment; the CI `secret-scan` job is the active backstop until then.
 - [ ] **[2026-06-27] Verify CI is green on first push.** Confirm the `secret-scan` and `rust`
   jobs pass (`fmt --check`, `clippy -D warnings`, `build` with `SQLX_OFFLINE=true`).
 

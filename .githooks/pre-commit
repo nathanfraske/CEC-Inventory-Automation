@@ -12,7 +12,7 @@ fail=0
 #    .env.example is the only env file that may be committed (placeholders only).
 staged="$(git diff --cached --name-only --diff-filter=ACM)"
 blocked="$(printf '%s\n' "$staged" \
-  | grep -E '(^|/)\.env$|(^|/)\.env\.[^/]*$|\.key$|\.pem$|\.p12$|\.pfx$|\.agekey$|\.dump$|\.sql\.gz$|(^|/)secrets/' \
+  | grep -E '(^|/)[^/]*\.env$|(^|/)\.env\.[^/]*$|\.key$|\.pem$|\.p12$|\.pfx$|\.agekey$|\.dump$|\.sql\.gz$|(^|/)secrets/' \
   | grep -vE '(^|/)\.env\.example$' || true)"
 if [ -n "$blocked" ]; then
   echo "pre-commit: BLOCKED — refusing to commit secret-shaped files:" >&2

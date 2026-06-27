@@ -46,6 +46,15 @@ and no live DB. Generate and commit `.sqlx/` once Phase 1 introduces checked que
   session; nothing of it is committed. Re-create the DB on the target box with `docker compose
   up -d db` (or `just up`).
 
+### Post-build verification [2026-06-27]
+Ran an adversarial multi-reviewer pass (runbook fidelity, secret hygiene + hooks, memory-doc
+quality, scope/schema consistency). Verdict: fix-then-ship, **no blockers, no secret exposure,
+both hooks function**. Applied the review's polish items in the same session: hardened the
+pre-commit regex to also block bare `*.env` (e.g. `prod.env`) to match `.gitignore`; defined the
+`◐ PARTIAL` tag in `CLAUDE.md` §3.2; aligned gate-F status across HANDOFF/TODO/CHANGELOG; added
+the `Last updated` header to `CHANGELOG.md`; and corrected the `D-001` SQLx note (Phase 0 uses
+runtime queries, so `.sqlx/` is intentionally absent until Phase 1).
+
 ### Next session should
 1. On a Docker host: `docker compose up -d --build` → close gate E; run gitleaks → close gate F.
 2. Begin Phase 1 (scope §20): wire object storage, the Python extractor, receipt capture +

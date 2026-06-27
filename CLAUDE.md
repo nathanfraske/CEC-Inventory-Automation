@@ -69,6 +69,8 @@ auditable (the same append-only ethos as the `unit_event` table). Mark state wit
   text, strike it through or quote it, and point to what replaced it.
 - `⛔ BLOCKED [YYYY-MM-DD] — <reason>` — cannot proceed; record the blocker and the unblock
   condition.
+- `◐ PARTIAL [YYYY-MM-DD] — <what is done vs outstanding>` — partially satisfied: the actionable
+  part is done but a portion is outstanding or has a backstop. Record both halves.
 
 Only purely ephemeral scratch (typos, reworded sentences) may be edited in place without a
 tombstone. Anything someone might later ask "what happened to X?" gets a tombstone.
