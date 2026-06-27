@@ -133,6 +133,10 @@ merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.m
 
 ## Done / Tombstoned
 
+- ✅ DONE [2026-06-27] Add mechanical §3-protocol enforcement hooks: Claude Code **Stop**
+  (`.claude/hooks/enforce-doc-compliance.sh`, blocks code-without-docs) + **PostToolUse**
+  date-check (`.claude/hooks/check-doc-dating.sh`) + SessionStart protocol surfacing. →
+  `CLAUDE.md` §4, `docs/HANDOFF.md` entry [2026-06-27] (hooks).
 - ✅ DONE [2026-06-27] Lay down the Phase 0 seed scaffold and pass gates A–D. → `docs/HANDOFF.md`
   entry [2026-06-27].
 - ✅ DONE [2026-06-27] Set up configuration hooks (git pre-commit secret-scan + Claude Code

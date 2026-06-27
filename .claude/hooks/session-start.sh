@@ -32,4 +32,14 @@ fi
 echo "CEC Inventory ready. Orientation order: CLAUDE.md -> docs/HANDOFF.md -> docs/TODO.md."
 echo "Design source of truth: docs/CEC-Inventory-System-Scope.md. Build steps: AGENT_RUNBOOK.md."
 echo "Never commit .env or DB dumps. Secrets live only in the gitignored .env (gen via scripts/gen_secrets.sh)."
+
+# --- memory-doc protocol (CLAUDE.md §3) — ENFORCED by hooks ------------------
+today="$(date +%F 2>/dev/null || echo 'unknown')"
+open_todos="$(grep -cE '\[ \]' docs/TODO.md 2>/dev/null || echo '?')"
+echo "Today is ${today}. The §3 memory/documentation protocol is ENFORCED by hooks:"
+echo "  - Stop hook BLOCKS finishing if you change source/ops files without updating docs/HANDOFF.md + docs/TODO.md"
+echo "    (and CHANGELOG.md / docs/DECISIONS.md / CLAUDE.md as warranted)."
+echo "  - Edits to a memory doc are date-checked: bump its 'Last updated:' to ${today}, date entries [${today}],"
+echo "    and TOMBSTONE completed/obsolete items (do not delete) per §3.1/§3.2."
+echo "Open TODO items: ${open_todos}. Read docs/TODO.md (top section is the current work queue) before acting."
 exit 0

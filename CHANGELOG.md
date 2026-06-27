@@ -8,6 +8,17 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-27 — Memory-protocol enforcement hooks (Stop + PostToolUse)
+- **Stop hook** (`.claude/hooks/enforce-doc-compliance.sh`): blocks finishing a session that
+  changed source/ops files without updating the memory docs (`HANDOFF`/`TODO`/`CHANGELOG`/
+  `DECISIONS`/`CLAUDE`), per `CLAUDE.md` §3. Loop-safe (`stop_hook_active`); read-only (`git status`).
+- **PostToolUse hook** (`.claude/hooks/check-doc-dating.sh`, `Edit|Write|MultiEdit`): when a
+  memory doc is edited, checks its `Last updated:` header is today and nudges to fix the
+  dating/tombstoning conventions (§3.1/§3.2).
+- **SessionStart** (`.claude/hooks/session-start.sh`): now also surfaces the §3 protocol,
+  today's date, and the open-TODO count into session context. Registered in
+  `.claude/settings.json`; documented in `CLAUDE.md` §4.
+
 ### Security — 2026-06-27 — CSRF defense (same-origin check) + CI build resilience
 - **CSRF:** cookie-authenticated, state-changing requests must be **same-origin** — the `Origin`
   (or `Referer`) host must match the request `Host`. A cross-site forged request carries the

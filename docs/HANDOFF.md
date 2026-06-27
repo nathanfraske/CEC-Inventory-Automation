@@ -6,6 +6,36 @@
 
 ---
 
+## Entry [2026-06-27] — Live on the compute box; §3 enforcement hooks added (agent: claude, compute-box onboarding)
+
+`main` pulled onto the real compute box (RTX 5090 32 GB · Core Ultra 7 265K, 18c · ~172 GB RAM ·
+~923 GB free root). Docker 29.5.3 + Compose v5.1.4 present; host Rust 1.96.0 lives in `~/.cargo`
+but is OFF the WSL `PATH` (only the Windows cargo is on it), so use the **Docker build path** —
+the api/poller Dockerfiles compile the binaries inside `rust:1-bookworm`, no host toolchain
+needed. The full container stack has still **NOT** been booted here and **no `.env` exists yet**;
+first-run steps are unchanged (CLAUDE.md §8 / the TODO "Now on a compute box" section). Gates
+E/F and deviations V-001/V-002 remain open pending that first boot + a local gitleaks scan.
+
+Added mechanical enforcement of the §3 memory-doc protocol (see CLAUDE.md §4 / CHANGELOG): a
+**Stop** hook (`.claude/hooks/enforce-doc-compliance.sh`) that blocks finishing when source/ops
+files change without a memory-doc update, and a **PostToolUse** hook
+(`.claude/hooks/check-doc-dating.sh`) that date-checks memory-doc edits; SessionStart now also
+surfaces the protocol + open-TODO count. All three were tested (allow/block/date-check paths)
+before landing.
+
+**Box note for the headline extractor integration:** a local **`cec-llm-broker`** is already
+running — OpenAI-style `/v1/models` on `127.0.0.1:8080`, managing named models incl. vision ones
+(`cec-worker-vision`, `cec-vision-judge`, a Windows-brokered `cec-worker-vision-win`) and a
+currently-loaded `deepseek-v4-flash`; a live-run dashboard is on `:8090`. The extractor's
+`services/extractor/vision.py` is hard-coded to the **Anthropic Messages** wire format
+(`POST /v1/messages`, `x-api-key`, `anthropic-version`), so pointing it at the broker is **not a
+drop-in** unless the broker exposes an Anthropic-compatible endpoint — otherwise add an
+OpenAI-shaped backend in `vision.py`. Also `docker-compose.yml` does **not** yet pass
+`ANTHROPIC_BASE_URL` through to the extractor container, so that must be added before any
+broker URL takes effect.
+
+---
+
 ## Entry [2026-06-27] — Handoff to a compute box; PR #1 merged (agent: claude/runbook-setup-config-oxwath)
 
 End-of-session state before the project moves from the headless web sandbox to a real compute

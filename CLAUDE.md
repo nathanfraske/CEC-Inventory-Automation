@@ -89,8 +89,18 @@ tombstone. Anything someone might later ask "what happened to X?" gets a tombsto
   installed. Defense in depth per `SECRETS-AND-DATABASE.md` §7.
 - **Claude Code SessionStart** (`.claude/settings.json` → `.claude/hooks/session-start.sh`):
   on every session it (a) verifies `.env` is ignored and not tracked, (b) re-asserts
-  `core.hooksPath=.githooks`, (c) warms the cargo cache so build/lint/test are ready. Runs
-  synchronously so dependencies are present before the agent loop starts.
+  `core.hooksPath=.githooks`, (c) warms the cargo cache so build/lint/test are ready, and
+  (d) prints the §3 memory-doc protocol, today's date, and the open-TODO count into context.
+  Runs synchronously so dependencies are present before the agent loop starts.
+- **Claude Code Stop** (`.claude/hooks/enforce-doc-compliance.sh`): enforces §3 mechanically.
+  If a session changed source/ops files (`crates/`, `migrations/`, `services/`, `scripts/`,
+  `.github/`, `docker-compose.yml`, `Cargo.*`, `justfile`, `rust-toolchain.toml`) but updated
+  none of the memory docs (`HANDOFF`/`TODO`/`DECISIONS`/`CHANGELOG`/`CLAUDE`), it blocks the
+  stop once (loop-safe via `stop_hook_active`) and names what to update. Read-only (inspects
+  `git status`); if no doc update is warranted, say so and stop again.
+- **Claude Code PostToolUse** (`Edit|Write|MultiEdit` → `.claude/hooks/check-doc-dating.sh`):
+  when a memory doc is edited, verifies its `Last updated:` header is today's date (§3.1) and,
+  if stale, nudges to bump it and to tombstone rather than delete (§3.2).
 - **CI** (`.github/workflows/ci.yml`) — five jobs: `secret-scan` (gitleaks), `rust`
   (`fmt --check` / `clippy -D warnings` / `build`, `SQLX_OFFLINE`), `tests` (full integration
   suite against a Postgres service), `compose` (builds the whole stack and smoke-tests
