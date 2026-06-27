@@ -102,7 +102,7 @@ jobs:
           # RUSTSEC-2023-0071 (rsa Marvin attack) enters via sqlx-mysql; we use postgres only,
           # so it is not on our compiled path. Remove the ignore if a fixed rsa ships.
           cargo audit --ignore RUSTSEC-2023-0071
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: pip-audit (extractor)
