@@ -2,5 +2,5 @@
 # invoice2data) are installed on the inference box per its hardware and are intentionally
 # not pinned here — the deterministic template path needs only the stdlib.
 fastapi>=0.110
-uvicorn[standard]>=0.29
+uvicorn[standard]>=0.49.0
 pydantic>=2
