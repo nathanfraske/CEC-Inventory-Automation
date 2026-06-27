@@ -8,6 +8,12 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- Warranty engine + RMA readiness (scope §5): `crates/api/src/warranty.rs` (pure, unit-tested)
+  computes both warranty clocks, `rma_eligible` + block reasons, and `cec_warranty_active`.
+  `CecWarrantyPolicy` CRUD (`/warranty-policies`), `POST /units/{id}/recompute-warranty`, and
+  `GET /units/{id}/warranty` (two-clock view with remaining days).
+
 ### Added — 2026-06-27 — Phase 1 (part): landed cost + order tracking
 - Landed-cost allocation (scope §14): `POST /purchases/{id}/allocate-costs` spreads order-level
   shipping + tax − discount across lines and writes per-line `allocated_landed_cost` and

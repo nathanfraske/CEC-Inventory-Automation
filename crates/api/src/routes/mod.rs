@@ -13,6 +13,7 @@ pub mod purchases;
 pub mod shipments;
 pub mod stock;
 pub mod units;
+pub mod warranty;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -56,6 +57,16 @@ pub fn router() -> Router<AppState> {
         .route("/units/{id}", get(units::get_unit))
         .route("/units/{id}/status", patch(units::change_status))
         .route("/units/{id}/events", get(units::list_events))
+        .route("/units/{id}/warranty", get(warranty::warranty_view))
+        .route(
+            "/units/{id}/recompute-warranty",
+            post(warranty::recompute_warranty),
+        )
+        // CEC warranty policy
+        .route(
+            "/warranty-policies",
+            post(warranty::create_policy).get(warranty::list_policies),
+        )
         // bulk stock
         .route("/stock", post(stock::create_stock).get(stock::list_stock))
         .route("/stock/{id}/adjust", post(stock::adjust_stock))

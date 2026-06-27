@@ -17,6 +17,7 @@ pub mod costing;
 pub mod error;
 pub mod events;
 pub mod routes;
+pub mod warranty;
 
 /// Shared application state handed to every handler.
 #[derive(Clone)]

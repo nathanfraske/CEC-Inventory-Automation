@@ -48,6 +48,10 @@ pg_enum!(UnitEventType => "unit_event_type" {
     RmaOpen, RmaUpdate, ReplaceOut, ReplaceIn, Scrap, Note
 });
 
+pg_enum!(MfrWarrantyBasis => "mfr_warranty_basis" {
+    Standard, OriginalRemainder, ReplacementTerm, Registered
+});
+
 pg_enum!(CarrierKind => "carrier_kind" { Usps, Ups, Fedex, Dhl, Other });
 
 pg_enum!(ShipmentStatus => "shipment_status" {

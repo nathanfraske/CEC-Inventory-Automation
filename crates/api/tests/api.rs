@@ -275,11 +275,23 @@ async fn phase1_landed_cost_and_shipment_tracking() {
         .await
         .unwrap();
     assert_eq!(alloc["extra_total"], "150.00");
-    // line 1: 1000 + 60 = 1060, per-unit 265; line 2: 1500 + 90 = 1590.
-    assert_eq!(alloc["lines"][0]["allocated_landed_cost"], "1060.00");
-    assert_eq!(alloc["lines"][0]["per_unit_cost"], "265.00");
-    assert_eq!(alloc["lines"][1]["allocated_landed_cost"], "1590.00");
-    assert_eq!(alloc["lines"][0]["units_updated"], 1);
+    // Lines come back ordered by id (random uuid), so match by line_total.
+    let find = |total: &str| -> Value {
+        alloc["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["line_total"] == total)
+            .cloned()
+            .unwrap()
+    };
+    // line 1000 (qty 4): +60 = 1060, per-unit 265; line 1500 (qty 1): +90 = 1590.
+    let l1000 = find("1000.00");
+    let l1500 = find("1500.00");
+    assert_eq!(l1000["allocated_landed_cost"], "1060.00");
+    assert_eq!(l1000["per_unit_cost"], "265.00");
+    assert_eq!(l1000["units_updated"], 1);
+    assert_eq!(l1500["allocated_landed_cost"], "1590.00");
 
     // The bound unit now carries the landed per-unit cost, and a `note` event was logged.
     let unit2: Value = c
@@ -350,4 +362,106 @@ async fn phase1_landed_cost_and_shipment_tracking() {
     assert_eq!(got["poll_state"], "stopped");
     assert_eq!(got["events"].as_array().unwrap().len(), 4);
     assert!(got["delivered_at"].is_string());
+}
+
+#[tokio::test]
+async fn phase3_warranty_recompute_and_readiness() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+
+    let mfr: Value = c
+        .post(format!("{base}/manufacturers"))
+        .json(&json!({ "name": "EVGA", "default_warranty_months": 36 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let mfr_id = mfr["id"].as_str().unwrap().to_string();
+
+    let product: Value = c
+        .post(format!("{base}/products"))
+        .json(&json!({ "model": "GPU", "category": "gpu", "manufacturer_id": mfr_id }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let product_id = product["id"].as_str().unwrap().to_string();
+
+    // CEC full-class policy: 12 months.
+    c.post(format!("{base}/warranty-policies"))
+        .json(&json!({ "warranty_class": "full", "term_months": 12, "transferable": true }))
+        .send()
+        .await
+        .unwrap();
+
+    // Purchase with a known datetime → mfr clock start.
+    let purchase: Value = c
+        .post(format!("{base}/purchases"))
+        .json(&json!({
+            "source_type": "manual",
+            "purchase_datetime": "2026-01-01T00:00:00Z",
+            "line_items": [{ "product_id": product_id, "quantity": 1, "line_total": "999.00" }]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let line_id = purchase["line_items"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let unit: Value = c
+        .post(format!("{base}/units"))
+        .json(&json!({ "product_id": product_id, "line_item_id": line_id, "serial_number": "GPU-W1" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let unit_id = unit["id"].as_str().unwrap().to_string();
+
+    // Recompute: mfr term 36 months from 2026-01-01 → 2029-01-01; rma eligible (serial +
+    // resolved + CEC receipt + in-warranty). CEC class is still `none` until delivery.
+    let w: Value = c
+        .post(format!("{base}/units/{unit_id}/recompute-warranty"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(w["mfr_warranty_expires"], "2029-01-01");
+    assert_eq!(w["rma_eligible"], true);
+    assert_eq!(w["cec_warranty_class"], "none");
+    assert_eq!(w["cec_warranty_active"], false);
+
+    // A unit with no serial blocks on `no_serial`.
+    let bare: Value = c
+        .post(format!("{base}/units"))
+        .json(&json!({ "product_id": product_id, "line_item_id": line_id }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let bare_id = bare["id"].as_str().unwrap().to_string();
+    let bw: Value = c
+        .post(format!("{base}/units/{bare_id}/recompute-warranty"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(bw["rma_eligible"], false);
+    assert_eq!(bw["rma_block_reason"], "no_serial");
 }
