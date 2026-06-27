@@ -16,6 +16,7 @@ use sqlx::PgPool;
 pub mod costing;
 pub mod error;
 pub mod events;
+pub mod extractor;
 pub mod routes;
 pub mod warranty;
 

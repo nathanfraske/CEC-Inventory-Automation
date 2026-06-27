@@ -9,6 +9,10 @@ dating + tombstoning conventions that govern the memory documents.
 ## [Unreleased]
 
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- Python extractor service (scope §11): `services/extractor` FastAPI app — `/health`,
+  `/extract` (deterministic template fast-path for known vendors incl. per-line serials, VLM
+  fallback stubbed), `/stitch` placeholder. Pure-stdlib `extractor.py` with tests; Dockerfile;
+  README. Rust seam `POST /extract-preview` proxies `EXTRACTOR_URL/extract` (502 when down).
 - Cross-cutting (scope §12.5/§18/§20): `GET /reorder` (stock at/below reorder point),
   `GET /receiving/reconciliation` (delivered-but-not-received worklist), `GET /export` (full
   no-lock-in JSON snapshot of every table) and `GET /export/units.csv` (units CSV).

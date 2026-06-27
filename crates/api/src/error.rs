@@ -9,6 +9,7 @@ use serde_json::json;
 pub enum ApiError {
     NotFound(String),
     BadRequest(String),
+    Upstream(String),
     Db(sqlx::Error),
     Internal(anyhow::Error),
 }
@@ -35,6 +36,7 @@ impl IntoResponse for ApiError {
         let (status, message) = match self {
             ApiError::NotFound(m) => (StatusCode::NOT_FOUND, m),
             ApiError::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
+            ApiError::Upstream(m) => (StatusCode::BAD_GATEWAY, m),
             ApiError::Db(e) => {
                 // Surface constraint violations as actionable 4xx; everything else is 500.
                 if let Some(dbe) = e.as_database_error() {

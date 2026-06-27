@@ -1317,3 +1317,18 @@ async fn crosscutting_reorder_reconciliation_export() {
     let body = csv.text().await.unwrap();
     assert!(body.starts_with("id,serial_number,product_id,status"));
 }
+
+#[tokio::test]
+async fn phase1_extract_preview_502_when_unreachable() {
+    let Some(base) = spawn().await else { return };
+    // Point the extractor seam at an unreachable address; the proxy should surface a 502.
+    std::env::set_var("EXTRACTOR_URL", "http://127.0.0.1:9");
+    let c = reqwest::Client::new();
+    let resp = c
+        .post(format!("{base}/extract-preview"))
+        .json(&json!({ "text": "Micro Center\n1 x RTX 4090 $1599.00 $1599.00" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 502);
+}

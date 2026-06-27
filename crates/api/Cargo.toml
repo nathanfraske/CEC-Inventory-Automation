@@ -17,6 +17,7 @@ uuid.workspace = true
 chrono.workspace = true
 rust_decimal.workspace = true
 regex.workspace = true
+reqwest.workspace = true
 cec-inventory-domain = { path = "../domain" }
 cec-inventory-tracking = { path = "../tracking" }
 
