@@ -13,11 +13,14 @@ merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.m
   (D-019: api published on 8081 because the broker owns 8080).
 - [x] **Close gate F locally.** ✅ DONE [2026-06-27] — gitleaks 8.30.1 installed; `gitleaks
   detect --source .` clean (no leaks, 47 commits). V-002 ended.
-- [ ] **Wire the real receipt vision to the local broker (chosen path):** the broker is
-  **OpenAI-shaped** (`/v1/chat/completions`; vision seat `cec-worker-vision` / Qwen3-VL) but
-  `vision.py` is **Anthropic-Messages-shaped** — add an OpenAI vision backend in `vision.py`,
-  pass `ANTHROPIC_BASE_URL`/broker vars + `extra_hosts: host.docker.internal:host-gateway` to the
-  extractor in compose, then test `POST /extract-image`. Keeps receipt images on-box (§11.2).
+- [x] **Wire the real receipt vision to the local broker.** ✅ DONE [2026-06-27] — added an
+  `openai` vision backend in `services/extractor/vision.py` (OpenAI `/chat/completions`, data-URI
+  image), wired `EXTRACTOR_VLM_*` + `extra_hosts: host.docker.internal:host-gateway` through
+  compose, set `.env` to `openai` + `cec-worker-vision`. Live test: receipt image → broker →
+  Qwen3-VL → correct §11.4 JSON (vendor/lines/serials/totals), `engine=vlm_openai`, images stay
+  on-box (§11.2). D-020. REMAINING: OpenCV long-receipt `/stitch` (still a placeholder); perf —
+  the default 35B seat runs experts in host RAM (`--n-cpu-moe`) and is slow on warm inference,
+  so consider the `cec-vision-judge` (Qwen3-VL-32B) seat or a higher broker GPU budget.
 - [ ] **Stand up scheduled backups:** install `scripts/systemd/cec-backup.{service,timer}`, set
   `BACKUP_AGE_RECIPIENT` (encryption) + an offsite target; verify with `scripts/restore_drill.sh`.
 

@@ -8,6 +8,15 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-27 — On-box receipt vision via an OpenAI-compatible backend
+- `services/extractor/vision.py` gains an `openai` backend (`EXTRACTOR_VLM_BACKEND=openai`) that
+  POSTs the receipt image to an OpenAI-compatible `/chat/completions` endpoint as a data-URI
+  `image_url` block and parses the §11.4 JSON back. Aimed at the on-box `cec-llm-broker`
+  (`EXTRACTOR_VLM_BASE_URL`), receipt images stay on-prem (scope §11.2). Config:
+  `EXTRACTOR_VLM_MODEL` / `_API_KEY` / `_MAX_TOKENS` / `_TIMEOUT`. docker-compose passes these
+  (+ `ANTHROPIC_BASE_URL`) through and adds `extra_hosts: host.docker.internal:host-gateway`.
+  Two hermetic unit tests added. Live-validated against Qwen3-VL on the 5090. Decision D-020.
+
 ### Changed — 2026-06-27 — Configurable API published port (API_PUBLISH_PORT)
 - The `api` service's published host port is now `${API_PUBLISH_PORT:-8080}` (container-internal
   stays 8080), so a box where 8080 is already taken (e.g. a local LLM broker) can override it in

@@ -6,6 +6,34 @@
 
 ---
 
+## Entry [2026-06-27] — On-box receipt vision wired to the cec-llm-broker (agent: claude, extractor vision)
+
+The receipt-**image** path now runs **on-box**. Added an `openai` backend to
+`services/extractor/vision.py` (OpenAI `/chat/completions` with a data-URI `image_url` block),
+selected by `EXTRACTOR_VLM_BACKEND=openai`; configured via `EXTRACTOR_VLM_BASE_URL` (the broker),
+`EXTRACTOR_VLM_MODEL`, optional `EXTRACTOR_VLM_API_KEY`/`_MAX_TOKENS`/`_TIMEOUT`. Compose now
+passes those through and adds `extra_hosts: host.docker.internal:host-gateway` so the container
+reaches the broker on the host (`ANTHROPIC_BASE_URL` is passed through now too). Two hermetic unit
+tests lock the wire format + the `vlm_openai` engine tag (6 vision tests green).
+
+**Live-validated:** `.env` set to `openai` + `cec-worker-vision`; a generated receipt PNG through
+`POST /extract-image` → broker cold-loaded the Qwen3-VL seat (~8.7 GB VRAM, ~75 s cold) → returned
+a correct §11.4 object (vendor `MICRO CENTER`, 3 line items with per-line serials, subtotal/tax/
+total), `engine=vlm_openai`. Receipt images never leave the box (scope §11.2 satisfied).
+
+Notes / follow-ups:
+- Committed default stays `EXTRACTOR_VLM_BACKEND=stub` (hermetic for CI/other boxes); only this
+  box's gitignored `.env` selects `openai`.
+- **Perf:** the default seat `cec-worker-vision` (Qwen3.6-35B, experts in host RAM via
+  `--n-cpu-moe`) is slow on warm inference (a warm request exceeded 120 s). For snappier OCR point
+  `EXTRACTOR_VLM_MODEL` at `cec-vision-judge` (Qwen3-VL-32B, GPU-resident) or raise the broker GPU
+  budget. Cold extraction proved correctness; latency is a seat-tuning choice.
+- **UX:** a cold load blocks the browser→api→extractor call (~75 s+). The api→extractor reqwest
+  has no timeout (rides through); consider pre-warming the seat or an async extract+confirm flow.
+- Still open: OpenCV long-receipt `/stitch` (placeholder).
+
+---
+
 ## Entry [2026-06-27] — Stack stood up + validated on the compute box; gates E & F closed (agent: claude, compute-box bring-up)
 
 First real boot of the full `docker compose` stack on the box (it had only ever run in CI).

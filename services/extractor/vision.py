@@ -7,13 +7,16 @@ receipts where only an image exists.
 
 Backends (env `EXTRACTOR_VLM_BACKEND`):
   * ``stub``   (default) — returns a low-confidence empty result; keeps CI/offline hermetic.
-  * ``claude``           — POSTs the image to the Anthropic Messages API (a Claude vision
-                           model) and parses the §11.4 JSON back. This is "Claude's own
-                           visual ability" standing in for the local VLM.
+  * ``openai``           — POSTs the image to an OpenAI-compatible ``/chat/completions`` endpoint
+                           (the on-box ``cec-llm-broker`` or any local VLM server) and parses the
+                           §11.4 JSON back. Preferred on-prem path: when ``EXTRACTOR_VLM_BASE_URL``
+                           points at the local broker, receipt images never leave the box (§11.2).
+  * ``claude``           — POSTs the image to the Anthropic Messages API (a hosted Claude vision
+                           model). Interim / off-box fallback.
 
-Privacy note: the ``claude`` backend sends the receipt image to a third-party API. It is
-opt-in (off by default). On the inference box, swap it for the local model and keep images
-on-prem (scope §11.2). No key is ever baked in — it is read from the environment at call time.
+Privacy note: the ``claude`` backend sends the receipt image to a third-party API; the ``openai``
+backend keeps it on-box when aimed at the local broker (scope §11.2). Both are opt-in (``stub``
+by default). No key is ever baked in — keys are read from the environment at call time.
 
 Pure stdlib (urllib) so the deterministic build stays dependency-free. The HTTP call is an
 injectable ``_transport`` so the parse/normalize path is unit-tested without network.
@@ -115,6 +118,66 @@ def _anthropic_transport(image_b64: str, media_type: str) -> str:
     )
 
 
+def _openai_transport(image_b64: str, media_type: str) -> str:
+    """Call an OpenAI-compatible ``/chat/completions`` endpoint (the on-box cec-llm-broker, or any
+    local VLM server) with the image as a data-URI ``image_url`` block; return the model's text.
+
+    When ``EXTRACTOR_VLM_BASE_URL`` is the local broker, the image stays on the box (scope §11.2).
+    The timeout is generous so a cold model load on the broker (boot-on-demand) rides through.
+    """
+    base = os.environ.get("EXTRACTOR_VLM_BASE_URL")
+    if not base:
+        raise RuntimeError(
+            "EXTRACTOR_VLM_BASE_URL is required for EXTRACTOR_VLM_BACKEND=openai "
+            "(e.g. http://host.docker.internal:8080/v1 for the local cec-llm-broker)"
+        )
+    model = os.environ.get("EXTRACTOR_VLM_MODEL")
+    if not model:
+        raise RuntimeError(
+            "EXTRACTOR_VLM_MODEL is required for EXTRACTOR_VLM_BACKEND=openai "
+            "(a vision-capable model id, e.g. cec-worker-vision)"
+        )
+    base = base.rstrip("/")
+    payload = {
+        "model": model,
+        "max_tokens": int(os.environ.get("EXTRACTOR_VLM_MAX_TOKENS", "2048")),
+        "temperature": 0,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": _SCHEMA_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{image_b64}"},
+                    },
+                ],
+            }
+        ],
+    }
+    headers = {"content-type": "application/json", "x-cec-client": "cec-inventory-extractor"}
+    key = os.environ.get("EXTRACTOR_VLM_API_KEY")
+    if key:
+        headers["authorization"] = f"Bearer {key}"
+    req = urllib.request.Request(
+        base + "/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    timeout = float(os.environ.get("EXTRACTOR_VLM_TIMEOUT", "600"))
+    with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 (host from env)
+        resp = json.loads(r.read().decode("utf-8"))
+    choices = resp.get("choices") or []
+    if not choices:
+        raise RuntimeError(f"vision endpoint returned no choices: {json.dumps(resp)[:300]}")
+    content = (choices[0].get("message") or {}).get("content")
+    # content is usually a string; some servers return a list of typed parts.
+    if isinstance(content, list):
+        content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+    return content or ""
+
+
 def _parse_json(text: str) -> dict:
     """Parse the model's reply, tolerating a stray markdown fence or surrounding prose."""
     t = text.strip()
@@ -134,9 +197,9 @@ def _parse_json(text: str) -> dict:
         raise
 
 
-def _normalize(raw: dict, vendor_hint: Optional[str]) -> dict:
+def _normalize(raw: dict, vendor_hint: Optional[str], engine: str = "vlm_claude") -> dict:
     """Coerce the model's object into the canonical §11.4 schema (fill gaps, fix types)."""
-    out = _empty_result(raw.get("vendor") or vendor_hint, "vlm_claude")
+    out = _empty_result(raw.get("vendor") or vendor_hint, engine)
     for k in (
         "purchase_datetime",
         "order_number",
@@ -180,6 +243,13 @@ def _normalize(raw: dict, vendor_hint: Optional[str]) -> dict:
     return out
 
 
+# Default transport + result-engine tag per backend.
+_BACKENDS: dict[str, tuple[Callable[[str, str], str], str]] = {
+    "openai": (_openai_transport, "vlm_openai"),
+    "claude": (_anthropic_transport, "vlm_claude"),
+}
+
+
 def extract_image(
     image_bytes: bytes,
     media_type: str = "image/jpeg",
@@ -191,11 +261,15 @@ def extract_image(
     if backend == "stub" and _transport is None:
         out = _empty_result(vendor_hint, "vlm_stub")
         out["note"] = (
-            "image VLM disabled (EXTRACTOR_VLM_BACKEND=stub); set it to 'claude' for the "
-            "interim hosted-vision path, or wire the local VLM on the inference box (scope §11.2)"
+            "image VLM disabled (EXTRACTOR_VLM_BACKEND=stub); set it to 'openai' for the on-box "
+            "broker/local-VLM path (scope §11.2), or 'claude' for the interim hosted path"
         )
         return out
-    transport = _transport or _anthropic_transport
+
+    # Unknown backend with no injected transport falls back to the Anthropic path (historical
+    # default); an injected transport keeps the backend's engine tag for test fidelity.
+    default_transport, engine = _BACKENDS.get(backend, (_anthropic_transport, "vlm_claude"))
+    transport = _transport or default_transport
     image_b64 = base64.b64encode(image_bytes).decode("ascii")
     raw = _parse_json(transport(image_b64, media_type))
-    return _normalize(raw, vendor_hint)
+    return _normalize(raw, vendor_hint, engine)

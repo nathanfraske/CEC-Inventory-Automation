@@ -37,11 +37,22 @@ services:
       dockerfile: Dockerfile
     environment:
       PYTHONUNBUFFERED: "1"
-      # Image vision backend (scope §11.2): 'stub' by default; 'claude' is the interim
-      # hosted-vision path. The key is a secret — supplied via the gitignored .env, never baked.
+      # Image vision backend (scope §11.2): 'stub' by default; 'openai' targets an
+      # OpenAI-compatible endpoint (the on-box cec-llm-broker / local VLM) and keeps receipt
+      # images on-prem; 'claude' is the interim hosted-vision path. Keys are secrets — supplied
+      # via the gitignored .env, never baked.
       EXTRACTOR_VLM_BACKEND: ${EXTRACTOR_VLM_BACKEND:-stub}
       EXTRACTOR_VLM_MODEL: ${EXTRACTOR_VLM_MODEL:-}
+      EXTRACTOR_VLM_BASE_URL: ${EXTRACTOR_VLM_BASE_URL:-}
+      EXTRACTOR_VLM_API_KEY: ${EXTRACTOR_VLM_API_KEY:-}
+      EXTRACTOR_VLM_MAX_TOKENS: ${EXTRACTOR_VLM_MAX_TOKENS:-2048}
+      EXTRACTOR_VLM_TIMEOUT: ${EXTRACTOR_VLM_TIMEOUT:-600}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+    # Reach a vision model served on the host (e.g. the cec-llm-broker on :8080) from inside the
+    # container: host.docker.internal resolves to the host gateway on native Docker + WSL2.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:8900:8900"
     healthcheck:
