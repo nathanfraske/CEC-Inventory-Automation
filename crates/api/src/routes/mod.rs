@@ -12,6 +12,7 @@ pub mod catalog;
 pub mod direct;
 pub mod intake;
 pub mod purchases;
+pub mod reports;
 pub mod rma;
 pub mod scan;
 pub mod shipments;
@@ -112,4 +113,12 @@ pub fn router() -> Router<AppState> {
         // bulk stock
         .route("/stock", post(stock::create_stock).get(stock::list_stock))
         .route("/stock/{id}/adjust", post(stock::adjust_stock))
+        // cross-cutting worklists + export
+        .route("/reorder", get(reports::reorder_list))
+        .route(
+            "/receiving/reconciliation",
+            get(reports::receiving_reconciliation),
+        )
+        .route("/export", get(reports::export_json))
+        .route("/export/units.csv", get(reports::export_units_csv))
 }

@@ -1204,3 +1204,116 @@ async fn phase1_identity_resolution_and_bundle_expansion() {
     assert_eq!(resolved["product_id"], placeholder);
     assert_eq!(resolved["resolution_status"], "confirmed");
 }
+
+#[tokio::test]
+async fn crosscutting_reorder_reconciliation_export() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+    let product: Value = c
+        .post(format!("{base}/products"))
+        .json(&json!({ "model": "Cable" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let product_id = product["id"].as_str().unwrap().to_string();
+
+    // Stock below reorder point shows on the reorder worklist.
+    let low: Value = c
+        .post(format!("{base}/stock"))
+        .json(&json!({ "product_id": product_id, "quantity_on_hand": 2, "reorder_point": 5 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let low_id = low["id"].as_str().unwrap().to_string();
+    let reorder: Value = c
+        .get(format!("{base}/reorder"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(reorder
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["stock_id"] == low_id.as_str()));
+
+    // A delivered shipment with no intaked units → receiving reconciliation flags it.
+    let purchase: Value = c
+        .post(format!("{base}/purchases"))
+        .json(&json!({ "source_type": "manual" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let purchase_id = purchase["id"].as_str().unwrap().to_string();
+    let shipment: Value = c
+        .post(format!("{base}/purchases/{purchase_id}/shipments"))
+        .json(&json!({ "carrier": "fedex", "tracking_number": "F123" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let shipment_id: uuid::Uuid = shipment["id"].as_str().unwrap().parse().unwrap();
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .connect(&std::env::var("DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    cec_inventory_tracking::poll_shipment(
+        &pool,
+        &cec_inventory_tracking::MockProvider::full(),
+        shipment_id,
+    )
+    .await
+    .unwrap();
+    let recon: Value = c
+        .get(format!("{base}/receiving/reconciliation"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(recon["delivered_not_received"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["shipment_id"] == shipment_id.to_string()));
+
+    // Full JSON export + units CSV.
+    let exp: Value = c
+        .get(format!("{base}/export"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(exp["units"].is_array());
+    assert!(exp["purchases"].is_array());
+    let csv = c
+        .get(format!("{base}/export/units.csv"))
+        .send()
+        .await
+        .unwrap();
+    assert!(csv
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("text/csv"));
+    let body = csv.text().await.unwrap();
+    assert!(body.starts_with("id,serial_number,product_id,status"));
+}

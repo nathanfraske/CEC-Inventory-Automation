@@ -9,6 +9,9 @@ dating + tombstoning conventions that govern the memory documents.
 ## [Unreleased]
 
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- Cross-cutting (scope §12.5/§18/§20): `GET /reorder` (stock at/below reorder point),
+  `GET /receiving/reconciliation` (delivered-but-not-received worklist), `GET /export` (full
+  no-lock-in JSON snapshot of every table) and `GET /export/units.csv` (units CSV).
 - Identity resolution + bundle expansion (scope §3/§15): `POST /line-items/{id}/resolve`
   (map a line to a product, status→confirmed) and `POST /line-items/{id}/expand` (split a
   combo line into child line items by MSRP weight (default) or even, remainder on the last;
