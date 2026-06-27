@@ -9,6 +9,11 @@ dating + tombstoning conventions that govern the memory documents.
 ## [Unreleased]
 
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- Parts sweep + warranty transfer (scope §6.5): `POST /systems/{id}/sweep` scans+reconciles
+  members (matched/missing/unexpected_extra → clean/discrepancies; clean re-validates),
+  `POST /systems/{id}/transfer` moves a delivered system to a new owner gated on a clean
+  sweep, with per-part manufacturer transferability (carried vs void_non_transferable),
+  recorded SystemTransfer + transfer/owner_change events.
 - Systems + delivery (scope §6.1/6.2): System CRUD, membership (`/systems/{id}/members`, a
   change invalidates), the validation primitive (`/validate` — a passing EOL/post-change
   validation restores `validated`), and `POST /systems/{id}/deliver` (shop→customer, stamps

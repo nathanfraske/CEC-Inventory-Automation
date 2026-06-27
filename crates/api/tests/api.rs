@@ -660,3 +660,128 @@ async fn phase3_systems_delivery_starts_cec_clock() {
     assert!(types.contains(&"deliver"));
     assert!(types.contains(&"owner_change"));
 }
+
+#[tokio::test]
+async fn phase4_parts_sweep_and_transfer() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+    c.post(format!("{base}/warranty-policies"))
+        .json(&json!({ "warranty_class": "full", "term_months": 12 }))
+        .send()
+        .await
+        .unwrap();
+    let product: Value = c
+        .post(format!("{base}/products"))
+        .json(&json!({ "model": "CPU Y", "category": "cpu" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let product_id = product["id"].as_str().unwrap().to_string();
+    let unit: Value = c
+        .post(format!("{base}/units"))
+        .json(&json!({ "product_id": product_id, "serial_number": "SW-1" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let unit_id = unit["id"].as_str().unwrap().to_string();
+    let system: Value = c
+        .post(format!("{base}/systems"))
+        .json(&json!({ "label": "SWP-1", "cec_warranty_class": "full" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let sid = system["id"].as_str().unwrap().to_string();
+    c.post(format!("{base}/systems/{sid}/members"))
+        .json(&json!({ "unit_id": unit_id }))
+        .send()
+        .await
+        .unwrap();
+    c.post(format!("{base}/systems/{sid}/validate"))
+        .json(&json!({ "validation_type": "eol", "result": "pass" }))
+        .send()
+        .await
+        .unwrap();
+    c.post(format!("{base}/systems/{sid}/deliver"))
+        .json(&json!({ "customer_ref": "cust-A" }))
+        .send()
+        .await
+        .unwrap();
+
+    // Discrepancy sweep (wrong serial) → invalidated; transfer then blocked.
+    let bad: Value = c
+        .post(format!("{base}/systems/{sid}/sweep"))
+        .json(&json!({ "scanned_serials": ["NOPE"] }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(bad["overall"], "discrepancies");
+    assert_eq!(bad["validation_state"], "invalidated");
+    let blocked = c
+        .post(format!("{base}/systems/{sid}/transfer"))
+        .json(&json!({ "to_owner_ref": "cust-B" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(blocked.status(), 400);
+
+    // Clean sweep → validated; transfer authorized by the sweep.
+    let good: Value = c
+        .post(format!("{base}/systems/{sid}/sweep"))
+        .json(&json!({ "scanned_serials": ["SW-1"], "performed_by": "bench" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(good["overall"], "clean");
+    let sweep_id = good["validation_id"].as_str().unwrap().to_string();
+
+    let tr: Value = c
+        .post(format!("{base}/systems/{sid}/transfer"))
+        .json(&json!({ "to_owner_ref": "cust-B", "sweep_id": sweep_id, "performed_by": "desk" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(tr["result"], "completed");
+    assert_eq!(tr["from_owner_ref"], "cust-A");
+    assert_eq!(tr["mfr_warranty_outcome"][0]["outcome"], "carried");
+
+    let u: Value = c
+        .get(format!("{base}/units/{unit_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(u["customer_ref"], "cust-B");
+    let events: Value = c
+        .get(format!("{base}/units/{unit_id}/events"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(events
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["event_type"] == "transfer"));
+}

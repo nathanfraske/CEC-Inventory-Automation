@@ -2,6 +2,8 @@
 //! primitive (a change invalidates; a passing EOL/post-change validation restores), and
 //! delivery (shop→customer) which starts the CEC warranty clock per member unit.
 
+use std::collections::HashSet;
+
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -12,8 +14,8 @@ use sqlx::{FromRow, PgConnection};
 use uuid::Uuid;
 
 use cec_inventory_domain::{
-    CecWarrantyClass, OwnerKind, SystemStatus, UnitEventType, ValidationResult, ValidationState,
-    ValidationTrigger, ValidationType,
+    CecWarrantyClass, CecWarrantyOutcome, OwnerKind, SystemStatus, TransferResult, UnitEventType,
+    ValidationResult, ValidationState, ValidationTrigger, ValidationType,
 };
 
 use crate::error::{ApiError, ApiResult};
@@ -447,5 +449,261 @@ pub async fn deliver_system(
         system_id: id,
         delivery_datetime: now,
         units_delivered: units.len(),
+    }))
+}
+
+// ---------------- parts sweep (scope §6.5) ----------------
+
+#[derive(Deserialize)]
+pub struct SweepReq {
+    pub scanned_serials: Vec<String>,
+    #[serde(default)]
+    pub performed_by: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct SweepOut {
+    pub validation_id: Uuid,
+    pub overall: String,
+    pub reconciliation: Value,
+    pub validation_state: ValidationState,
+}
+
+/// Scan-and-reconcile the system's members against the scanned serial set. A clean sweep
+/// re-validates the system (and authorizes a transfer); discrepancies record fail.
+pub async fn sweep_system(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(b): Json<SweepReq>,
+) -> ApiResult<Json<SweepOut>> {
+    let _ = fetch_system(&s, id).await?;
+    let members: Vec<(Uuid, Option<String>)> =
+        sqlx::query_as("SELECT id, serial_number FROM inventory_unit WHERE system_id = $1")
+            .bind(id)
+            .fetch_all(&s.db)
+            .await?;
+
+    let scanned: HashSet<&str> = b.scanned_serials.iter().map(|s| s.as_str()).collect();
+    let recorded: HashSet<&str> = members.iter().filter_map(|(_, sn)| sn.as_deref()).collect();
+
+    let mut missing = 0usize;
+    let per_unit: Vec<Value> = members
+        .iter()
+        .map(|(uid, sn)| {
+            let result = match sn.as_deref() {
+                Some(s) if scanned.contains(s) => "matched",
+                _ => {
+                    missing += 1;
+                    "missing"
+                }
+            };
+            json!({ "unit_id": uid, "serial": sn, "result": result })
+        })
+        .collect();
+    let extras: Vec<&str> = scanned
+        .iter()
+        .copied()
+        .filter(|s| !recorded.contains(s))
+        .collect();
+
+    let clean = missing == 0 && extras.is_empty();
+    let overall = if clean { "clean" } else { "discrepancies" };
+    let reconciliation =
+        json!({ "per_unit": per_unit, "unexpected_extra": extras, "overall": overall });
+    let result = if clean {
+        ValidationResult::Pass
+    } else {
+        ValidationResult::Fail
+    };
+    let snapshot = parts_snapshot(&s, id).await?;
+
+    let mut tx = s.db.begin().await?;
+    let validation_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO system_validation \
+         (system_id, validation_type, trigger, performed_by, result, parts_snapshot, reconciliation) \
+         VALUES ($1,'sweep','transfer_request',$2,$3,$4,$5) RETURNING id",
+    )
+    .bind(id)
+    .bind(b.performed_by.as_deref())
+    .bind(result)
+    .bind(&snapshot)
+    .bind(&reconciliation)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let new_state = if clean {
+        sqlx::query(
+            "UPDATE system SET validation_state = 'validated', last_validated_at = now(), \
+             last_validated_by = $2 WHERE id = $1",
+        )
+        .bind(id)
+        .bind(b.performed_by.as_deref())
+        .execute(&mut *tx)
+        .await?;
+        ValidationState::Validated
+    } else {
+        invalidate(&mut tx, id).await?;
+        ValidationState::Invalidated
+    };
+    tx.commit().await?;
+
+    Ok(Json(SweepOut {
+        validation_id,
+        overall: overall.to_string(),
+        reconciliation,
+        validation_state: new_state,
+    }))
+}
+
+// ---------------- warranty transfer (scope §6.5) ----------------
+
+#[derive(Deserialize)]
+pub struct TransferReq {
+    pub to_owner_ref: String,
+    #[serde(default)]
+    pub performed_by: Option<String>,
+    /// The authorizing clean sweep; if omitted, the system must currently be `validated`.
+    #[serde(default)]
+    pub sweep_id: Option<Uuid>,
+    #[serde(default = "default_outcome")]
+    pub cec_warranty_outcome: CecWarrantyOutcome,
+    #[serde(default)]
+    pub cec_transfer_fee: Option<rust_decimal::Decimal>,
+}
+
+fn default_outcome() -> CecWarrantyOutcome {
+    CecWarrantyOutcome::Carried
+}
+
+#[derive(Serialize)]
+pub struct TransferOut {
+    pub transfer_id: Uuid,
+    pub result: TransferResult,
+    pub from_owner_ref: Option<String>,
+    pub to_owner_ref: String,
+    pub mfr_warranty_outcome: Value,
+}
+
+/// Transfer a delivered system to a new owner (scope §6.5). Precondition: a clean sweep
+/// (or a currently-validated system). Manufacturer warranty carries per-part only where the
+/// maker allows it; non-transferable parts are flagged void-on-transfer.
+pub async fn transfer_system(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(b): Json<TransferReq>,
+) -> ApiResult<Json<TransferOut>> {
+    let system = fetch_system(&s, id).await?;
+    if !matches!(system.current_owner, OwnerKind::Customer) {
+        return Err(ApiError::BadRequest(
+            "only a delivered (customer-owned) system can be transferred".into(),
+        ));
+    }
+
+    // Authorize via the named sweep, or a currently-validated system.
+    let authorized = match b.sweep_id {
+        Some(sid) => {
+            let ok: Option<(String, String)> = sqlx::query_as(
+                "SELECT result::text, validation_type::text FROM system_validation \
+                 WHERE id = $1 AND system_id = $2",
+            )
+            .bind(sid)
+            .bind(id)
+            .fetch_optional(&s.db)
+            .await?;
+            matches!(ok, Some((r, t)) if r == "pass" && (t == "sweep" || t == "pre_transfer"))
+        }
+        None => matches!(system.validation_state, ValidationState::Validated),
+    };
+    if !authorized {
+        return Err(ApiError::BadRequest(
+            "transfer blocked: a clean parts sweep is required (scope §6.5)".into(),
+        ));
+    }
+
+    // Per-part manufacturer transferability.
+    let parts: Vec<(Uuid, Option<bool>)> = sqlx::query_as(
+        "SELECT u.id, m.warranty_transferable FROM inventory_unit u \
+         LEFT JOIN product p ON p.id = u.product_id \
+         LEFT JOIN manufacturer m ON m.id = p.manufacturer_id WHERE u.system_id = $1",
+    )
+    .bind(id)
+    .fetch_all(&s.db)
+    .await?;
+    let mfr_outcome = Value::Array(
+        parts
+            .iter()
+            .map(|(uid, transferable)| {
+                let outcome = if transferable.unwrap_or(true) {
+                    "carried"
+                } else {
+                    "void_non_transferable"
+                };
+                json!({ "unit_id": uid, "outcome": outcome })
+            })
+            .collect(),
+    );
+
+    let from_owner_ref = system.customer_ref.clone();
+    let mut tx = s.db.begin().await?;
+    sqlx::query("UPDATE system SET customer_ref = $2, status = 'in_service' WHERE id = $1")
+        .bind(id)
+        .bind(&b.to_owner_ref)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE inventory_unit SET customer_ref = $2 WHERE system_id = $1")
+        .bind(id)
+        .bind(&b.to_owner_ref)
+        .execute(&mut *tx)
+        .await?;
+
+    let transfer_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO system_transfer \
+         (system_id, from_owner_ref, to_owner_ref, performed_by, sweep_id, mfr_warranty_outcome, \
+          cec_warranty_outcome, cec_transfer_fee, result) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'completed') RETURNING id",
+    )
+    .bind(id)
+    .bind(from_owner_ref.as_deref())
+    .bind(&b.to_owner_ref)
+    .bind(b.performed_by.as_deref())
+    .bind(b.sweep_id)
+    .bind(&mfr_outcome)
+    .bind(b.cec_warranty_outcome)
+    .bind(b.cec_transfer_fee)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    for (uid, _) in &parts {
+        log_unit_event(
+            &mut *tx,
+            *uid,
+            UnitEventType::Transfer,
+            from_owner_ref.as_deref(),
+            Some(&b.to_owner_ref),
+            b.performed_by.as_deref(),
+            Some(id),
+            None,
+        )
+        .await?;
+        log_unit_event(
+            &mut *tx,
+            *uid,
+            UnitEventType::OwnerChange,
+            from_owner_ref.as_deref(),
+            Some(&b.to_owner_ref),
+            b.performed_by.as_deref(),
+            Some(id),
+            None,
+        )
+        .await?;
+    }
+    tx.commit().await?;
+
+    Ok(Json(TransferOut {
+        transfer_id,
+        result: TransferResult::Completed,
+        from_owner_ref,
+        to_owner_ref: b.to_owner_ref,
+        mfr_warranty_outcome: mfr_outcome,
     }))
 }

@@ -82,6 +82,8 @@ pub fn router() -> Router<AppState> {
         )
         .route("/systems/{id}/validate", post(systems::validate_system))
         .route("/systems/{id}/deliver", post(systems::deliver_system))
+        .route("/systems/{id}/sweep", post(systems::sweep_system))
+        .route("/systems/{id}/transfer", post(systems::transfer_system))
         // no-receipt intakes
         .route("/trade-ins", post(intake::create_trade_in))
         .route("/opening-balance", post(intake::create_opening_balance))
