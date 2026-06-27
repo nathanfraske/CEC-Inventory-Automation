@@ -9,6 +9,12 @@ dating + tombstoning conventions that govern the memory documents.
 ## [Unreleased]
 
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- RMA lifecycle (scope §7): `POST /units/{id}/rma` opens a case (derives execution mode /
+  proof source / custody from ownership), `GET/PATCH /rma/{id}`, `GET /rma`,
+  `POST /rma/{id}/proof-package` (bundles receipt + serial + warranty terms, stored on the
+  case + object store), and `POST /rma/{id}/replacement` (new `rma_replacement` unit linked to
+  its predecessor, refurb→refurb class, replacement-term mfr warranty, predecessor retired,
+  inherited system re-validates). New RMA domain enums.
 - Parts sweep + warranty transfer (scope §6.5): `POST /systems/{id}/sweep` scans+reconciles
   members (matched/missing/unexpected_extra → clean/discrepancies; clean re-validates),
   `POST /systems/{id}/transfer` moves a delivered system to a new owner gated on a clean

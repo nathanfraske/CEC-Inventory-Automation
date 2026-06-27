@@ -785,3 +785,135 @@ async fn phase4_parts_sweep_and_transfer() {
         .iter()
         .any(|e| e["event_type"] == "transfer"));
 }
+
+#[tokio::test]
+async fn phase3_rma_lifecycle_and_replacement() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+    let mfr: Value = c
+        .post(format!("{base}/manufacturers"))
+        .json(&json!({ "name": "Corsair", "default_warranty_months": 60 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let product: Value = c
+        .post(format!("{base}/products"))
+        .json(&json!({ "model": "PSU RMx", "category": "psu", "manufacturer_id": mfr["id"] }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let product_id = product["id"].as_str().unwrap().to_string();
+    let purchase: Value = c
+        .post(format!("{base}/purchases"))
+        .json(&json!({
+            "source_type": "manual",
+            "purchase_datetime": "2026-02-01T00:00:00Z",
+            "line_items": [{ "product_id": product_id, "quantity": 1, "line_total": "150.00" }]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let line_id = purchase["line_items"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let unit: Value = c
+        .post(format!("{base}/units"))
+        .json(&json!({ "product_id": product_id, "line_item_id": line_id, "serial_number": "PSU-RMA-1" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let unit_id = unit["id"].as_str().unwrap().to_string();
+
+    // Open RMA: shop-owned + CEC receipt → cec_managed, proof cec_receipt.
+    let case: Value = c
+        .post(format!("{base}/units/{unit_id}/rma"))
+        .json(&json!({ "fault_description": "no power", "party": "manufacturer" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let case_id = case["id"].as_str().unwrap().to_string();
+    assert_eq!(case["status"], "open");
+    assert_eq!(case["proof_source"], "cec_receipt");
+    assert_eq!(case["execution_mode"], "cec_managed");
+    let ucheck: Value = c
+        .get(format!("{base}/units/{unit_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(ucheck["status"], "rma_open");
+
+    // Proof-of-purchase package.
+    let pkg: Value = c
+        .post(format!("{base}/rma/{case_id}/proof-package"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(pkg["serial_number"], "PSU-RMA-1");
+    assert_eq!(pkg["product"]["manufacturer"], "Corsair");
+
+    // Refurbished replacement intake.
+    let rep: Value = c
+        .post(format!("{base}/rma/{case_id}/replacement"))
+        .json(&json!({ "serial_number": "PSU-RMA-2", "refurbished": true }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let new_unit = rep["replacement_unit_id"].as_str().unwrap().to_string();
+    let nu: Value = c
+        .get(format!("{base}/units/{new_unit}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(nu["acquisition_method"], "rma_replacement");
+    assert_eq!(nu["condition"], "refurb");
+    assert_eq!(nu["cec_warranty_class"], "refurb");
+
+    // Predecessor retired; case advanced.
+    let old: Value = c
+        .get(format!("{base}/units/{unit_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(old["status"], "returned");
+    let cc: Value = c
+        .get(format!("{base}/rma/{case_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(cc["status"], "replacement_received");
+    assert_eq!(cc["replacement_unit_id"], new_unit);
+}

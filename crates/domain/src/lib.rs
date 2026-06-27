@@ -81,3 +81,20 @@ pg_enum!(ShipmentStatus => "shipment_status" {
 });
 
 pg_enum!(PollState => "poll_state" { Active, Stopped });
+
+pg_enum!(RmaParty => "rma_party" { Vendor, Manufacturer });
+
+pg_enum!(RmaExecutionMode => "rma_execution_mode" {
+    CecManaged, CustomerShipsToCec, CustomerManagedAssist
+});
+
+pg_enum!(RmaProofSource => "rma_proof_source" { CecReceipt, CustomerReceipt });
+
+pg_enum!(RmaCustody => "rma_custody" {
+    AtCec, WithCustomer, InTransitToCec, InTransitToVendor, InTransitToCustomer
+});
+
+pg_enum!(RmaStatus => "rma_status" {
+    Open, InfoProvidedToCustomer, AwaitingCustomerAction, ShippedToVendor, AwaitingReplacement,
+    ReplacementReceived, ReplacementWithCustomer, Refunded, Denied, Closed
+});

@@ -11,6 +11,7 @@ use crate::AppState;
 pub mod catalog;
 pub mod intake;
 pub mod purchases;
+pub mod rma;
 pub mod shipments;
 pub mod stock;
 pub mod systems;
@@ -84,6 +85,12 @@ pub fn router() -> Router<AppState> {
         .route("/systems/{id}/deliver", post(systems::deliver_system))
         .route("/systems/{id}/sweep", post(systems::sweep_system))
         .route("/systems/{id}/transfer", post(systems::transfer_system))
+        // RMA lifecycle
+        .route("/units/{id}/rma", post(rma::open_rma))
+        .route("/rma", get(rma::list_rma))
+        .route("/rma/{id}", get(rma::get_rma).patch(rma::update_rma))
+        .route("/rma/{id}/proof-package", post(rma::proof_package))
+        .route("/rma/{id}/replacement", post(rma::intake_replacement))
         // no-receipt intakes
         .route("/trade-ins", post(intake::create_trade_in))
         .route("/opening-balance", post(intake::create_opening_balance))
