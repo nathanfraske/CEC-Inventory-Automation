@@ -1528,6 +1528,74 @@ Subtotal $1618.98\nTax $133.57\nTotal $1752.55\n";
     assert!(lines.iter().all(|l| l["resolution_status"] == "unresolved"));
 }
 
+// `POST /purchases/from-payload` persists a caller-supplied §11.4 extraction payload (the
+// interim seam an external/operator/agent vision pass uses) — no extractor service needed, so
+// this runs in CI. Mirrors what the Claude-vision backend would emit for a photographed receipt.
+#[tokio::test]
+async fn from_payload_persists_supplied_extraction() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+
+    let payload = json!({
+        "extraction": {
+            "vendor": "Photographed Vendor",
+            "purchase_datetime": "2026-05-04T09:15:00",
+            "order_number": "IMG-42",
+            "currency": "USD",
+            "engine": "vlm_claude",
+            "line_items": [
+                {"description": "RTX 4070", "vendor_sku": "GPU7", "quantity": 1,
+                 "unit_price": 599.00, "line_total": 599.00, "serials": ["SNIMG-1"], "is_bundle": false},
+                {"description": "Case fan", "quantity": 3, "unit_price": 12.0, "line_total": 36.0}
+            ],
+            "subtotal": 635.00, "tax": 52.00, "total": 687.00,
+            "field_confidence": {"vendor": 0.6, "total": 0.6, "datetime": 0.6}
+        },
+        "source_type": "physical_photo",
+        "created_by": "vision-op"
+    });
+
+    let r: Value = c
+        .post(format!("{base}/purchases/from-payload"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(r["engine"], "vlm_claude");
+    assert_eq!(r["line_item_count"], 2);
+    assert_eq!(r["needs_resolution"], true);
+
+    let pur: Value = c
+        .get(format!(
+            "{base}/purchases/{}",
+            r["purchase_id"].as_str().unwrap()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(pur["order_number"], "IMG-42");
+    assert_eq!(pur["total"], "687.00");
+    assert_eq!(pur["source_type"], "physical_photo");
+    let lines = pur["line_items"].as_array().unwrap();
+    assert_eq!(lines.len(), 2);
+    assert!(lines.iter().all(|l| l["resolution_status"] == "unresolved"));
+
+    // A non-object payload is a 400, not a 500.
+    let bad = c
+        .post(format!("{base}/purchases/from-payload"))
+        .json(&json!({ "extraction": "not-an-object" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 400);
+}
+
 #[tokio::test]
 async fn auth_bootstrap_login_protect_logout() {
     let Ok(url) = std::env::var("DATABASE_URL") else {

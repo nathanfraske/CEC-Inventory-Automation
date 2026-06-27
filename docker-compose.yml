@@ -30,8 +30,12 @@ services:
       context: ./services/extractor
       dockerfile: Dockerfile
     environment:
-      # Reserved for the inference-box image (model paths, device); the base app needs none.
       PYTHONUNBUFFERED: "1"
+      # Image vision backend (scope §11.2): 'stub' by default; 'claude' is the interim
+      # hosted-vision path. The key is a secret — supplied via the gitignored .env, never baked.
+      EXTRACTOR_VLM_BACKEND: ${EXTRACTOR_VLM_BACKEND:-stub}
+      EXTRACTOR_VLM_MODEL: ${EXTRACTOR_VLM_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ports:
       - "127.0.0.1:8900:8900"
     healthcheck:

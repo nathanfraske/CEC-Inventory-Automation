@@ -5,11 +5,17 @@ running on the inference box, not the web host. Two paths, one schema:
 
 - **Template fast-path** (`extractor.template_extract`) — deterministic regex parsers for
   known vendors (Micro Center, Newegg, …). No model, no GPU, no hallucination. Vendors that
-  print serials (Micro Center) are pulled per line.
-- **VLM fallback** (`extractor.vlm_extract_stub`) — a stub here; on the inference box this
-  wires a vision-language model (e.g. Qwen2.5-VL, scope §11.2) for arbitrary receipts.
+  print serials (Micro Center) are pulled per line. Used for pasted/OCR'd **text**.
+- **Image vision** (`vision.extract_image`) — for a receipt **image** (first-seen receipts
+  where only a photo exists). Backend via `EXTRACTOR_VLM_BACKEND`:
+  - `stub` (default) — empty, clearly-noted result; keeps the build/CI hermetic.
+  - `claude` — the **interim** path: POSTs the image to the Anthropic Messages API (a Claude
+    vision model) and parses the §11.4 JSON. Needs `ANTHROPIC_API_KEY` + `EXTRACTOR_VLM_MODEL`
+    in the gitignored `.env`. Privacy: this sends the image to a third-party API — opt-in,
+    off by default; swap for the local VLM (Qwen2.5-VL etc., scope §11.2) on the inference box.
 
-`extractor.py` is pure stdlib so it is unit-testable without the web deps or any ML runtime.
+`extractor.py` and `vision.py` are pure stdlib so both are unit-testable without the web deps
+or any ML runtime — `vision`'s network call is an injectable `_transport`.
 
 ## Run
 

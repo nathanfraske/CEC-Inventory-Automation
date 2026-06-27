@@ -128,6 +128,16 @@ pub fn router() -> Router<AppState> {
             "/purchases/from-extraction",
             post(crate::extractor::create_from_extraction),
         )
+        // receipt image → draft purchase via the vision backend (interim VLM path, scope §11.2)
+        .route(
+            "/purchases/from-image",
+            post(crate::extractor::create_from_image),
+        )
+        // persist a caller-supplied §11.4 payload (external/operator vision pass)
+        .route(
+            "/purchases/from-payload",
+            post(crate::extractor::create_from_payload),
+        )
 }
 
 /// Public server-rendered UI (scope §18 path 1). The pages render for anyone on the mesh, but

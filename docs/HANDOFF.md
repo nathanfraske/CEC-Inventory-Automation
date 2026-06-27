@@ -6,6 +6,53 @@
 
 ---
 
+## Entry [2026-06-27] — Interim image-vision receipt path (agent: claude/runbook-setup-config-oxwath)
+
+Closed the "need a GPU box to read receipt images" gap with an interim hosted-vision path, plus
+a generic seam so an in-the-loop vision pass (operator or agent) can feed the loop right now.
+
+### What landed
+- **`services/extractor/vision.py`** — `extract_image(bytes, media_type, vendor_hint)` →
+  §11.4 JSON. Backend via `EXTRACTOR_VLM_BACKEND`: `stub` (default, hermetic) or `claude`
+  (POSTs the image to the Anthropic Messages API, parses + normalizes the JSON). Pure stdlib;
+  the HTTP call is an injectable `_transport` so the parse/normalize path is unit-tested with no
+  network. `POST /extract-image` added; `/health` reports the active backend.
+- **Rust seam** (`crate::extractor`): `extract_image` client; the purchase-persist logic
+  refactored into a shared `persist_extraction`; new routes `POST /purchases/from-image`
+  (multipart photo → draft purchase via the vision backend) and `POST /purchases/from-payload`
+  (persist a **caller-supplied** §11.4 payload — the seam for an external/operator/agent vision
+  pass; no Python service needed).
+- **UI**: `/ui/new` gained a *Receipt → draft purchase* block (paste text → `from-extraction`,
+  or upload a photo → `from-image` via a multipart `cecUpload` helper).
+- Config: `EXTRACTOR_VLM_BACKEND` / `EXTRACTOR_VLM_MODEL` / `ANTHROPIC_API_KEY` placeholders in
+  both `.env.example`s; passed through to the extractor container in compose. New dep `base64`.
+
+### Design note (D-015)
+The `claude` backend is the **interim** until the local VLM is wired; it is opt-in, off by
+default, key-from-env (never baked), and sends the image to a third-party API (a privacy
+trade-off recorded for the security panel). `from-payload` keeps the loop extractor-agnostic —
+the §11.4 JSON is the only contract.
+
+### Verification (this environment)
+- `fmt`/`clippy -D warnings` clean; `cargo test --workspace` → **10 unit + 16 integration**
+  green (added `from_payload_persists_supplied_extraction`). Python: `test_vision.py` (hermetic,
+  injected transport) + the existing extractor tests pass.
+- Live: uvicorn extractor `/health` shows `vlm_backend: stub`; `/extract-image` returns the
+  stub result; and the full **multipart** path `POST /purchases/from-image` through the auth-on
+  API (login → cookie → upload) created a draft purchase (201). `docker compose config` renders
+  the new extractor env.
+
+### Still open
+- The **local** VLM on the inference box (so images stay on-prem) + OpenCV long-receipt
+  stitching (`/stitch` placeholder). Body-size limits for large photos through multipart/JSON
+  are a follow-up. See `docs/TODO.md`.
+
+### For live testing in-session
+`POST /purchases/from-payload` is the path to use the agent's own vision as the interim: read a
+receipt image, produce the §11.4 JSON, POST it → a draft purchase with unresolved lines.
+
+---
+
 ## Entry [2026-06-27] — Operator front-end: login + entry forms + workflow actions (agent: claude/runbook-setup-config-oxwath)
 
 Turned the read-only UI into a usable operator front-end. Previously you could look (dashboard

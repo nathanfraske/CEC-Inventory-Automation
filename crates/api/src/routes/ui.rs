@@ -62,6 +62,23 @@ async function cecSubmit(form){
   return false;
 }
 async function cecLogout(){ await fetch('/auth/logout',{method:'POST'}); location.href='/'; }
+async function cecUpload(form){
+  const out = form.querySelector('.result');
+  const fd = new FormData();
+  form.querySelectorAll('[name]').forEach(el=>{
+    if(el.type==='file'){ if(el.files[0]) fd.append(el.name, el.files[0]); }
+    else if(el.value!=='') fd.append(el.name, el.value);
+  });
+  if(out){ out.textContent='…'; out.className='result'; }
+  try{
+    const r = await fetch(form.action,{method:'POST',body:fd});
+    const text = await r.text();
+    let pretty=text; try{ pretty=JSON.stringify(JSON.parse(text),null,2); }catch(e){}
+    if(out){ out.textContent=(r.ok?'✓ ':'✗ ')+r.status+'\n'+pretty; out.className='result '+(r.ok?'ok':'err'); }
+    if(r.ok && form.dataset.redirect){ setTimeout(()=>location.href=form.dataset.redirect,800); }
+  }catch(e){ if(out){ out.textContent='✗ '+e; out.className='result err'; } }
+  return false;
+}
 "#;
 
 fn nav(user: Option<&str>) -> String {
@@ -382,8 +399,23 @@ pub async fn new_entry(State(s): State<AppState>, jar: SignedCookieJar) -> ApiRe
 
     let body = format!(
         "<h1>New entry</h1>{gate}\
-<p class=\"muted\">Each form POSTs JSON to the API with your session cookie. \
-Build the catalog first (manufacturer → product), then add units/stock.</p>\
+<p class=\"muted\">Each form POSTs to the API with your session cookie. \
+Build the catalog first (manufacturer → product), then add units/stock — or start from a \
+receipt below.</p>\
+\
+<h2>Receipt → draft purchase (scope §3/§11)</h2>\
+<p class=\"muted\">Paste a receipt's text, or upload a photo. Both create a draft purchase with \
+<b>unresolved</b> line items for you to map to products. The image path uses the extractor's \
+vision backend (<code>stub</code> until <code>EXTRACTOR_VLM_BACKEND=claude</code> or the local \
+VLM is wired); the deterministic template path handles known vendors' pasted text.</p>\
+<form class=\"cec\" action=\"/purchases/from-extraction\" data-redirect=\"/ui/purchases\" onsubmit=\"return cecSubmit(this)\">\
+<label>Receipt text</label><textarea name=\"text\" data-required=\"1\" rows=\"5\" placeholder=\"Micro Center\\nOrder # MC-10293\\n1 x RTX 4090  SKU:GPU1  SN:GPU-2291X  $1599.00  $1599.00\\nTotal $1599.00\"></textarea>\
+<label>Vendor hint (optional)</label><input name=\"vendor_hint\">\
+<button>Extract from text</button><pre class=\"result\"></pre></form>\
+<form class=\"cec\" action=\"/purchases/from-image\" data-redirect=\"/ui/purchases\" onsubmit=\"return cecUpload(this)\">\
+<label>Receipt photo</label><input name=\"file\" type=\"file\" accept=\"image/*\" capture=\"environment\">\
+<label>Vendor hint (optional)</label><input name=\"vendor_hint\">\
+<button>Extract from image</button><pre class=\"result\"></pre></form>\
 \
 <h2>Vendor</h2>\
 <form class=\"cec\" action=\"/vendors\" data-reload=\"1\" onsubmit=\"return cecSubmit(this)\">\

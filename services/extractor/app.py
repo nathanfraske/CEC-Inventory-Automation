@@ -6,23 +6,34 @@ backend POSTs receipt text (or, later, ordered images) and receives the §11.4 J
 Endpoints:
   GET  /health        liveness
   POST /extract       {text, vendor_hint?} -> structured line items (template or VLM)
+  POST /extract-image {image_base64, media_type?, vendor_hint?} -> §11.4 JSON via the vision
+                      backend (interim hosted-vision path; scope §11.2)
   POST /stitch        placeholder for the OpenCV multi-image stitch pre-step (scope §10)
 """
 
 from __future__ import annotations
 
+import base64
+import os
 from typing import List, Optional
 
 from fastapi import FastAPI
 from pydantic import BaseModel
 
 import extractor
+import vision
 
 app = FastAPI(title="CEC Inventory Extractor", version="0.1.0")
 
 
 class ExtractRequest(BaseModel):
     text: str
+    vendor_hint: Optional[str] = None
+
+
+class ExtractImageRequest(BaseModel):
+    image_base64: str
+    media_type: str = "image/jpeg"
     vendor_hint: Optional[str] = None
 
 
@@ -33,12 +44,24 @@ class StitchRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "extractor"}
+    # Report the active vision backend so the stack/operator can see whether the interim
+    # hosted-vision path is live (stub by default).
+    return {
+        "status": "ok",
+        "service": "extractor",
+        "vlm_backend": os.environ.get("EXTRACTOR_VLM_BACKEND", "stub"),
+    }
 
 
 @app.post("/extract")
 def extract(req: ExtractRequest) -> dict:
     return extractor.extract(req.text, req.vendor_hint)
+
+
+@app.post("/extract-image")
+def extract_image(req: ExtractImageRequest) -> dict:
+    data = base64.b64decode(req.image_base64)
+    return vision.extract_image(data, req.media_type, req.vendor_hint)
 
 
 @app.post("/stitch")

@@ -58,8 +58,11 @@
   `query!`/`query_as!` + commit `.sqlx/` (a large rewrite — the current SQL is built with
   `format!` column-list consts that macros can't take; the CI run covers the correctness gap
   meanwhile).
-- [ ] **[2026-06-27]** Extractor: wire a real VLM + OpenCV stitching on the inference box
-  (deterministic template path + Rust seam are done). (§10/§11)
+- ◐ PARTIAL **[2026-06-27]** Extractor vision (§10/§11.2). DONE: an interim image-vision path —
+  `vision.py` with a `claude` backend (Anthropic Messages API) behind `EXTRACTOR_VLM_BACKEND`,
+  `POST /extract-image`, the Rust `from-image` (multipart) + `from-payload` seams, and a UI
+  receipt block. OUTSTANDING: the **local** VLM (Qwen2.5-VL etc.) on the inference box so images
+  stay on-prem, and OpenCV long-receipt stitching (`/stitch` is still a placeholder).
 - [ ] **[2026-06-27]** Real carrier provider(s) behind the `CarrierProvider` trait (USPS/UPS/
   FedEx/DHL or an aggregator); only `none`/`mock` exist. (INV-OQ-30)
 - ◐ PARTIAL **[2026-06-27]** UI build-out (§10/§13/§18). DONE: login/first-run page +

@@ -8,6 +8,21 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-27 — Interim image-vision receipt path (scope §11.2)
+- Receipt **images** can now be extracted without the local GPU VLM. New `vision.py` backend
+  selected by `EXTRACTOR_VLM_BACKEND`: `stub` (default, hermetic) or `claude` — POSTs the image
+  to the Anthropic Messages API (a Claude vision model) and parses the §11.4 JSON. Key/model are
+  read from the gitignored `.env`; opt-in and off by default (the image is third-party egress).
+  New extractor endpoint `POST /extract-image`; `/health` now reports the active backend.
+- Rust seam: `extractor::extract_image` (base64 → extractor), a shared `persist_extraction`
+  helper, and two new routes — `POST /purchases/from-image` (multipart photo → draft purchase)
+  and `POST /purchases/from-payload` (persist a caller-supplied §11.4 payload — the seam an
+  external/operator/agent vision pass uses to feed the loop now, no Python service required).
+- UI: `/ui/new` gains a **Receipt → draft purchase** block (paste text, or upload a photo).
+- Tests: hermetic `test_vision.py` (injected transport) + a `from_payload_persists_supplied_extraction`
+  integration test. Live-smoked the full multipart image path through the auth-on API against a
+  uvicorn extractor.
+
 ### Added — 2026-06-27 — Operator front-end: login, entry forms, workflow actions
 - The UI is no longer read-only. New server-rendered pages (still no template-engine dep):
   - **Login / first-run** (`/ui/login`): logs in via `POST /auth/login`, or bootstraps the
