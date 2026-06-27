@@ -8,6 +8,13 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-27 — Backup automation (schedule, encryption, retention, restore drill)
+- `db_backup.sh` gains optional at-rest **encryption** (`BACKUP_AGE_RECIPIENT` → age) and
+  **retention pruning** (`BACKUP_RETENTION_DAYS`, default 30).
+- `scripts/systemd/cec-backup.{service,timer}` schedule a nightly DB+object-store backup.
+- New `scripts/restore_drill.sh` proves restorability: restores the latest dump into a throwaway
+  DB, checks schema + row counts, validates the objects archive, and drops it. Tested locally.
+
 ### Added — 2026-06-27 — Service-account API tokens for external integration (D-018)
 - External/machine-to-machine apps now authenticate with a bearer token
   (`Authorization: Bearer cec_pat_…`) instead of a cookie session. New `api_token` table
