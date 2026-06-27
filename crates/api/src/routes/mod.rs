@@ -124,6 +124,10 @@ pub fn router() -> Router<AppState> {
         .route("/export/units.csv", get(reports::export_units_csv))
         // receipt extraction (proxies the Python extractor service, scope §11)
         .route("/extract-preview", post(crate::extractor::extract_preview))
+        .route(
+            "/purchases/from-extraction",
+            post(crate::extractor::create_from_extraction),
+        )
         // operator UI (server-rendered, scope §18 path 1)
         .route("/", get(ui::dashboard))
         .route("/ui/units", get(ui::units_page))

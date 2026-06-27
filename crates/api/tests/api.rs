@@ -1379,3 +1379,52 @@ async fn ui_pages_render() {
     assert!(scan.contains("BarcodeDetector"));
     assert!(scan.contains(&uid.to_string()));
 }
+
+// Runs only when EXTRACTOR_TEST_URL points at a live extractor service (set locally with
+// uvicorn). Skipped in CI, which has no extractor.
+#[tokio::test]
+async fn phase1_create_from_extraction() {
+    let Ok(ext) = std::env::var("EXTRACTOR_TEST_URL") else {
+        eprintln!("skipping: EXTRACTOR_TEST_URL not set");
+        return;
+    };
+    std::env::set_var("EXTRACTOR_URL", &ext);
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+
+    let text = "Micro Center\nOrder # MC-9\n2026-03-02 14:31\n\
+1 x GeForce RTX 4090  SKU:GPU1  SN:GPU-2291X  $1599.00  $1599.00\n\
+2 x HDMI Cable  SKU:CAB9  $9.99  $19.98\n\
+Subtotal $1618.98\nTax $133.57\nTotal $1752.55\n";
+
+    let r: Value = c
+        .post(format!("{base}/purchases/from-extraction"))
+        .json(&json!({ "text": text, "created_by": "op1" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(r["engine"], "template");
+    assert_eq!(r["line_item_count"], 2);
+    assert_eq!(r["needs_resolution"], true);
+
+    let pur: Value = c
+        .get(format!(
+            "{base}/purchases/{}",
+            r["purchase_id"].as_str().unwrap()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(pur["order_number"], "MC-9");
+    assert_eq!(pur["total"], "1752.55");
+    let lines = pur["line_items"].as_array().unwrap();
+    assert_eq!(lines.len(), 2);
+    // Lines come back unresolved for the operator to map + scan into units.
+    assert!(lines.iter().all(|l| l["resolution_status"] == "unresolved"));
+}

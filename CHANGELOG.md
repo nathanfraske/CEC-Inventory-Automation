@@ -9,6 +9,12 @@ dating + tombstoning conventions that govern the memory documents.
 ## [Unreleased]
 
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- Receipt→inventory loop (scope §3): `POST /purchases/from-extraction` calls the extractor and
+  persists a draft purchase + unresolved line items (storing the raw payload on
+  `purchase.raw_extract`) for operator resolution → units. Verified end-to-end against a live
+  uvicorn extractor.
+- CI now runs the integration suite against a Postgres service (`tests` job) — every exercised
+  query is validated against the live schema on each push.
 - Operator UI (scope §18 path 1): server-rendered dashboard (`/`) with live counts and
   `/ui/units`, `/ui/systems`, `/ui/purchases` tables (no template-engine dep), plus a
   camera/barcode scan island (`/ui/scan/{unit_id}`) that posts to the verify endpoint
