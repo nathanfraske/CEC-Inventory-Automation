@@ -8,13 +8,16 @@
 
 The project moved from the web sandbox (no docker daemon / no gitleaks) to a real box; PR #1 is
 merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.md` §8):
-- [ ] **Close gate E locally:** `just secrets` → `docker compose up -d --build`; confirm
-  `curl localhost:8080/readyz` and the extractor `/health`. (CI already proves this; now do it on
-  the box.) Then **tombstone deviation V-001**.
-- [ ] **Close gate F locally:** install `gitleaks`, run `just scan`, confirm zero leaks. Then
-  **tombstone deviation V-002**.
-- [ ] **Wire the real receipt vision:** set `EXTRACTOR_VLM_BACKEND=claude` (hosted interim) or
-  stand up the local VLM + OpenCV stitching on the GPU box (`services/extractor/`).
+- [x] **Close gate E locally.** ✅ DONE [2026-06-27] — full stack built + came up healthy
+  (db/extractor/api/poller); `/readyz`=`{"db":"up"}`, extractor `/health` ok. V-001 ended
+  (D-019: api published on 8081 because the broker owns 8080).
+- [x] **Close gate F locally.** ✅ DONE [2026-06-27] — gitleaks 8.30.1 installed; `gitleaks
+  detect --source .` clean (no leaks, 47 commits). V-002 ended.
+- [ ] **Wire the real receipt vision to the local broker (chosen path):** the broker is
+  **OpenAI-shaped** (`/v1/chat/completions`; vision seat `cec-worker-vision` / Qwen3-VL) but
+  `vision.py` is **Anthropic-Messages-shaped** — add an OpenAI vision backend in `vision.py`,
+  pass `ANTHROPIC_BASE_URL`/broker vars + `extra_hosts: host.docker.internal:host-gateway` to the
+  extractor in compose, then test `POST /extract-image`. Keeps receipt images on-box (§11.2).
 - [ ] **Stand up scheduled backups:** install `scripts/systemd/cec-backup.{service,timer}`, set
   `BACKUP_AGE_RECIPIENT` (encryption) + an offsite target; verify with `scripts/restore_drill.sh`.
 

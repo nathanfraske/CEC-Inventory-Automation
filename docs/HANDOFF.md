@@ -6,6 +6,35 @@
 
 ---
 
+## Entry [2026-06-27] — Stack stood up + validated on the compute box; gates E & F closed (agent: claude, compute-box bring-up)
+
+First real boot of the full `docker compose` stack on the box (it had only ever run in CI).
+**All four services healthy:** db, extractor (`vlm_backend: stub`), api, poller. `/readyz` →
+`{"db":"up"}` (migrations 0001–0005 auto-applied). Validated end-to-end: `POST /auth/bootstrap`
+(first admin) → login (signed cookie) → authenticated reads → a CSRF-guarded write (created a
+vendor) → minted + used a `cec_pat_` bearer token.
+
+- **Gate E CLOSED / V-001 ended** — the committed `docker compose up -d --build` path works on a
+  real daemon, not just CI.
+- **Gate F CLOSED / V-002 ended** — installed gitleaks 8.30.1; `gitleaks detect --source .` =
+  **no leaks** across 47 commits (the only `--no-git` hits are the generated secrets in the
+  gitignored `.env`, by design).
+- **Port conflict resolved:** the `cec-llm-broker` permanently owns `127.0.0.1:8080`, so the api
+  could not bind it. Made the published host port configurable (`API_PUBLISH_PORT`, default 8080;
+  D-019); this box runs the api on **8081** (container-internal stays 8080). Admin/token/UI are at
+  `http://127.0.0.1:8081`.
+- **Storage note:** this distro's vhdx lives on `E:\wsl\Ubuntu-24.04`, so Docker grows on **E:**
+  (~328 GB free, 92% full alongside 3.4 TB of AI models). Watch image/build-cache growth; the
+  vhdx does not auto-shrink.
+
+Next (per TODO): wire the extractor to the local broker — but the broker is **OpenAI-shaped**
+(`/v1/chat/completions`, vision seat `cec-worker-vision` / Qwen3-VL), while `vision.py` is
+**Anthropic-Messages-shaped**, so this needs a new OpenAI vision backend in `vision.py`
+(+ `ANTHROPIC_BASE_URL`/broker passthrough + `extra_hosts` in compose), not a config flip. Then
+scheduled backups.
+
+---
+
 ## Entry [2026-06-27] — Live on the compute box; §3 enforcement hooks added (agent: claude, compute-box onboarding)
 
 `main` pulled onto the real compute box (RTX 5090 32 GB · Core Ultra 7 265K, 18c · ~172 GB RAM ·

@@ -8,6 +8,11 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Changed — 2026-06-27 — Configurable API published port (API_PUBLISH_PORT)
+- The `api` service's published host port is now `${API_PUBLISH_PORT:-8080}` (container-internal
+  stays 8080), so a box where 8080 is already taken (e.g. a local LLM broker) can override it in
+  the gitignored `.env`. Default is unchanged; documented in `.env.example`. Decision D-019.
+
 ### Added — 2026-06-27 — Memory-protocol enforcement hooks (Stop + PostToolUse)
 - **Stop hook** (`.claude/hooks/enforce-doc-compliance.sh`): blocks finishing a session that
   changed source/ops files without updating the memory docs (`HANDOFF`/`TODO`/`CHANGELOG`/
