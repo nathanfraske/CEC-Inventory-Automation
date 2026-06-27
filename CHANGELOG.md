@@ -9,6 +9,10 @@ dating + tombstoning conventions that govern the memory documents.
 ## [Unreleased]
 
 ### Added — 2026-06-27 — Phase 3+ build-out (in progress)
+- Trade-in & opening-balance intake (scope §8/§9): `POST /trade-ins` and `POST /opening-balance`
+  resolve units to `owner=shop` and set RMA readiness from the proof situation (provided →
+  pending; will-send → `awaiting_proof_from_customer`; lacks/none/unknown-origin →
+  `no_proof_of_purchase`); opening-balance rides a synthetic `opening_balance` purchase.
 - Warranty engine + RMA readiness (scope §5): `crates/api/src/warranty.rs` (pure, unit-tested)
   computes both warranty clocks, `rma_eligible` + block reasons, and `cec_warranty_active`.
   `CecWarrantyPolicy` CRUD (`/warranty-policies`), `POST /units/{id}/recompute-warranty`, and

@@ -465,3 +465,87 @@ async fn phase3_warranty_recompute_and_readiness() {
     assert_eq!(bw["rma_eligible"], false);
     assert_eq!(bw["rma_block_reason"], "no_serial");
 }
+
+#[tokio::test]
+async fn phase2_trade_in_and_opening_balance() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+    let product: Value = c
+        .post(format!("{base}/products"))
+        .json(&json!({ "model": "Used SSD", "category": "storage" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let product_id = product["id"].as_str().unwrap().to_string();
+
+    // Trade-in with no proof → unit not RMA-able, reason recorded, owner shop.
+    let ti: Value = c
+        .post(format!("{base}/trade-ins"))
+        .json(&json!({
+            "customer_ref": "cust-1",
+            "proof_of_purchase_status": "customer_lacks",
+            "units": [{ "product_id": product_id, "serial_number": "SSD-T1", "condition": "used" }]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let ti_unit = ti["unit_ids"][0].as_str().unwrap().to_string();
+    let u: Value = c
+        .get(format!("{base}/units/{ti_unit}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(u["owner"], "shop");
+    assert_eq!(u["acquisition_method"], "trade_in");
+    assert_eq!(u["rma_eligible"], false);
+    assert_eq!(u["rma_block_reason"], "no_proof_of_purchase");
+
+    // Opening-balance, unknown origin → synthetic purchase, units not RMA-able.
+    let ob: Value = c
+        .post(format!("{base}/opening-balance"))
+        .json(&json!({
+            "origin_known": false,
+            "units": [{ "product_id": product_id, "serial_number": "SSD-OB1" }]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(ob["purchase_id"].is_string());
+    let ob_unit = ob["unit_ids"][0].as_str().unwrap().to_string();
+    let ou: Value = c
+        .get(format!("{base}/units/{ob_unit}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(ou["acquisition_method"], "opening_balance");
+    assert_eq!(ou["rma_block_reason"], "no_proof_of_purchase");
+
+    // The opening-balance purchase is a synthetic source_type=opening_balance.
+    let pur: Value = c
+        .get(format!(
+            "{base}/purchases/{}",
+            ob["purchase_id"].as_str().unwrap()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(pur["source_type"], "opening_balance");
+}

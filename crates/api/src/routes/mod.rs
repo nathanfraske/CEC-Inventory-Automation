@@ -9,6 +9,7 @@ use axum::{
 use crate::AppState;
 
 pub mod catalog;
+pub mod intake;
 pub mod purchases;
 pub mod shipments;
 pub mod stock;
@@ -67,6 +68,9 @@ pub fn router() -> Router<AppState> {
             "/warranty-policies",
             post(warranty::create_policy).get(warranty::list_policies),
         )
+        // no-receipt intakes
+        .route("/trade-ins", post(intake::create_trade_in))
+        .route("/opening-balance", post(intake::create_opening_balance))
         // bulk stock
         .route("/stock", post(stock::create_stock).get(stock::list_stock))
         .route("/stock/{id}/adjust", post(stock::adjust_stock))

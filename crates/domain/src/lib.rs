@@ -52,6 +52,10 @@ pg_enum!(MfrWarrantyBasis => "mfr_warranty_basis" {
     Standard, OriginalRemainder, ReplacementTerm, Registered
 });
 
+pg_enum!(ProofStatus => "proof_status" {
+    Provided, CustomerHasWillSend, CustomerLacks, None
+});
+
 pg_enum!(CarrierKind => "carrier_kind" { Usps, Ups, Fedex, Dhl, Other });
 
 pg_enum!(ShipmentStatus => "shipment_status" {
