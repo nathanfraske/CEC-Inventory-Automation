@@ -55,6 +55,13 @@ pre-commit regex to also block bare `*.env` (e.g. `prod.env`) to match `.gitigno
 the `Last updated` header to `CHANGELOG.md`; and corrected the `D-001` SQLx note (Phase 0 uses
 runtime queries, so `.sqlx/` is intentionally absent until Phase 1).
 
+### CI fix [2026-06-27]
+First PR CI run failed on the `secret-scan` job: `gitleaks-action@v2` now requires
+`GITHUB_TOKEN` to scan `pull_request` events (the log confirmed it was a config error, not a
+detected secret — "No license key is required"). Fixed by passing
+`env: GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` to the gitleaks step in
+`.github/workflows/ci.yml`. The `rust` job (fmt/clippy/build) was unaffected.
+
 ### Next session should
 1. On a Docker host: `docker compose up -d --build` → close gate E; run gitleaks → close gate F.
 2. Begin Phase 1 (scope §20): wire object storage, the Python extractor, receipt capture +

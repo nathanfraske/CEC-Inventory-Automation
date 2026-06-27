@@ -25,6 +25,11 @@ dating + tombstoning conventions that govern the memory documents.
 - Docs: `docs/CEC-Inventory-System-Scope.md` (design source of truth), `AGENT_RUNBOOK.md`,
   `SECRETS-AND-DATABASE.md`, `README.md`.
 
+### Fixed — 2026-06-27
+- CI `secret-scan` job: pass `GITHUB_TOKEN` to `gitleaks/gitleaks-action@v2`. The action now
+  requires it to scan `pull_request` events; without it the gitleaks job failed on PR #1 (a
+  config error, not a detected secret — the log confirmed "No license key is required").
+
 ### Notes
 - Acceptance gates A–D verified in this environment (the DB was a native Postgres 16 cluster
   rather than `docker compose up -d db`, since the sandbox has no docker daemon — deviation
