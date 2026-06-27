@@ -129,7 +129,11 @@ scripts           gen_secrets / db_backup / db_restore
 
 ## 7. Build phases (scope §20)
 
-Phase 0 (this scaffold): schema + API spine + secret hygiene + CI. Done — see `docs/HANDOFF.md`.
-Phases 1–5: receipt capture/extraction/cost/tracking → scan/labels/migration → ownership,
-delivery, warranties, RMA → systems/re-validation/transfer → cec.direct seam. Build by phase;
-each is shippable. Keep the memory docs current as you go.
+Phase 0 (scaffold): schema + API spine + secret hygiene + CI. Done.
+Phases 1–5: the **backend for every phase is implemented and tested** (warranty + RMA
+readiness, trade-in/opening-balance intake, systems + delivery, sweep + transfer, RMA
+lifecycle, cec.direct seam, serial verify + asset tags, identity resolution + bundles,
+reorder/reconciliation/export, the Python extractor's deterministic path + Rust seam, and a
+server-rendered UI). See `docs/HANDOFF.md` for the per-section map. Remaining follow-ups
+(compile-time-checked queries + `.sqlx/` + DB-in-CI; extractor VLM/OpenCV; real carrier
+providers; WASM scan fallback + guided capture) are tracked in `docs/TODO.md`.

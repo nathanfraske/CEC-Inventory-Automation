@@ -6,6 +6,50 @@
 
 ---
 
+## Entry [2026-06-27] — Phases 2–5 + remaining Phase 1 backend build-out (agent: claude/runbook-setup-config-oxwath)
+
+Worked the rest of the scope (§20) in 11 verified chunks, each its own commit with build +
+`fmt --check` + `clippy -D warnings` + tests green. The system now covers, end to end on the
+backend, every phase of the scope. Current test counts: **10 unit + 13 integration** passing
+against the live DB (integration tests self-skip when `DATABASE_URL` is unset, so CI stays
+DB-free).
+
+### What landed (by scope section)
+- **§5 Warranty engine + RMA readiness** — `crates/api/src/warranty.rs` (pure, tested): two
+  warranty clocks, `rma_eligible` + block reasons, `cec_warranty_active`. `CecWarrantyPolicy`
+  CRUD; `POST /units/{id}/recompute-warranty`; `GET /units/{id}/warranty`.
+- **§8/§9 Trade-in & opening-balance intake** — `routes/intake.rs`: readiness from proof.
+- **§6.1/6.2 Systems + delivery** — `routes/systems.rs`: System CRUD, membership (invalidates),
+  validate, `deliver` (starts the per-unit CEC clock).
+- **§6.4/6.5 Sweep + transfer** — `sweep` (reconcile members) + `transfer` (gated on a clean
+  sweep, per-part mfr transferability).
+- **§7 RMA lifecycle** — `routes/rma.rs`: open (modes/proof/custody), update, proof-package,
+  replacement intake (predecessor retire + system re-validate).
+- **§19 cec.direct seam** — `routes/direct.rs`: `/availability`, reserve, consume.
+- **§13 serial verify + asset tags** — `routes/scan.rs`: verification pass + regex validation
+  (warn-only); `asset-tag` (ZPL label payload).
+- **§3/§15 identity resolution + bundle expansion** — `/line-items/{id}/resolve` + `/expand`.
+- **§12.5/§18/§20 cross-cutting** — `routes/reports.rs`: reorder, receiving reconciliation,
+  `/export` (JSON) + `/export/units.csv`.
+- **§11 extractor** — `services/extractor/` FastAPI (template fast-path + VLM stub),
+  pure-stdlib tested + FastAPI TestClient verified; Rust seam `POST /extract-preview`.
+- **§18 path 1 UI** — `routes/ui.rs`: server-rendered dashboard + tables + a camera/scan island.
+
+### New crates/deps
+`crates/tracking` (carrier provider + poll engine). Deps added: `rust_decimal`, `regex`,
+`async-trait`, `reqwest` (api), axum `multipart`, sqlx `json`/`rust_decimal`. Domain enums for
+every PG enum the features touch.
+
+### Honest gaps (follow-ups, see `docs/TODO.md`)
+- Data access is still SQLx **runtime** queries (no `.sqlx/`); compile-time-checked queries +
+  a Postgres-service CI job that runs the integration tests remain the deliberate follow-up
+  (D-010). CI today builds DB-free and does not execute the integration tests.
+- The extractor VLM path, OpenCV stitching, real carrier providers, and the WASM scan
+  fallback / guided long-receipt capture are stubs/islands needing the inference box, a real
+  carrier account, or a device. The schema, seams, and deterministic paths are in place.
+
+---
+
 ## Entry [2026-06-27] — Phase 1 (part): landed-cost allocation + shipment tracking (agent: claude/runbook-setup-config-oxwath)
 
 First two Phase 1 features (scope §20), both fully verified here.

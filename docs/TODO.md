@@ -48,6 +48,24 @@
 - [ ] **[2026-06-27]** Wire a real carrier provider (USPS/UPS/FedEx/DHL direct, or an
   aggregator) behind the `CarrierProvider` trait; today only `none`/`mock` exist (INV-OQ-30).
 
+## Open — hardening follow-ups (backend for Phases 1–5 is done; see HANDOFF [2026-06-27])
+
+- [ ] **[2026-06-27]** Migrate to compile-time-checked SQLx queries + commit `.sqlx/`, and add
+  a Postgres-service CI job that runs `cargo test` (integration tests self-skip today). (D-010)
+- [ ] **[2026-06-27]** Extractor: wire a real VLM + OpenCV stitching on the inference box
+  (deterministic template path + Rust seam are done). (§10/§11)
+- [ ] **[2026-06-27]** Real carrier provider(s) behind the `CarrierProvider` trait (USPS/UPS/
+  FedEx/DHL or an aggregator); only `none`/`mock` exist. (INV-OQ-30)
+- [ ] **[2026-06-27]** UI: WASM scan fallback (Safari/iOS), guided long-receipt capture, and
+  HTMX-driven manual-entry forms over the JSON API. (§10/§13/§18)
+
+## Done — Phases 1–5 backend (✅ DONE [2026-06-27], details in HANDOFF + CHANGELOG)
+
+- ✅ §5 warranty engine + RMA readiness · ✅ §8/§9 trade-in/opening-balance · ✅ §6.1/6.2 systems
+  + delivery · ✅ §6.4/6.5 sweep + transfer · ✅ §7 RMA lifecycle · ✅ §19 cec.direct seam ·
+  ✅ §13 serial verify + asset tags · ✅ §3/§15 identity resolution + bundles · ✅ §12.5/§18/§20
+  reorder/reconciliation/export · ✅ §11 extractor (deterministic path) · ✅ §18 server-rendered UI.
+
 ## Open — later phases (track here as they start; full detail in scope §20)
 
 - [ ] **[2026-06-27]** Phase 2 — browser scan loop (native + WASM), serial→unit binding +
