@@ -3,4 +3,4 @@
 # not pinned here — the deterministic template path needs only the stdlib.
 fastapi>=0.110
 uvicorn[standard]>=0.29
-pydantic>=2
+pydantic>=2.13.4
