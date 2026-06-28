@@ -6,6 +6,40 @@
 
 ---
 
+## Entry [2026-06-28] — DESIGN: automated procurement intake (email ingest + carrier tracking) — no code yet (agent: claude, procurement-design)
+
+Owner asked whether the system can auto-ingest vendor order-confirmation emails and auto-track
+orders. Researched it (vendor email formats, Gmail headless auth, buyer-side retailer APIs, carrier
+aggregators) + a codebase integration audit, and wrote a design (no code): **`docs/DESIGN-
+procurement-intake.md`** + decisions **D-024** (email ingest) and **D-025** (carrier tracking).
+
+Key findings / shape:
+- The system is already ~70% there: `SourceType::Email`, the `from-payload` draft seam, the
+  broker, the vendor templates, and the **whole tracking scaffolding** (`crates/tracking` trait +
+  `crates/poller`) all exist; tracking just has no live provider (`none`/`mock`).
+- **Don't give it retailer-account access.** Buyer-side order APIs don't exist (Amazon SP-API is
+  seller-only; Newegg/Micro Center none) and scraping is ToS/CAPTCHA/2FA-brittle. The durable path:
+  the **shipping-confirmation emails already carry the carrier + tracking number** → attach a
+  shipment → the existing poller tracks it via **EasyPost** (auto-detects carrier from a bare
+  number; D-025).
+- Core design decision: an order is an **order-keyed record enriched over its lifecycle**, not one
+  email. New idempotent `POST /purchases/ingest` creates a draft on the confirmation and enriches
+  the same purchase (costs / shipment / cancellations) as later emails arrive (deduped by
+  `Message-ID`, correlated by `vendor_order_number`). This handles the owner's constraints: Amazon
+  confirmations omit tax/shipping/total (filled later from the invoice or the **Amazon Business
+  API** — owner has a Business account), shipping confirms arrive later, and payment-declined /
+  item-issue emails are first-class amend events.
+- New pieces: `crates/email-ingest` worker (mirrors the poller; Gmail IMAP app password, poll
+  ~5 min), extractor `/extract-email` (on-box **text** model → §11.4), the ingest endpoint +
+  migration `0007`, and the EasyPost provider. 6-phase build plan in the design doc §13.
+
+Awaiting owner input (design §14): which Gmail mailbox; which Amazon Business API access; EasyPost
+sign-off; auto-apply-vs-review line; volume. **Next action when approved:** start build phase 1
+(EasyPost provider — smallest, immediately useful). Docs only this entry (design + DECISIONS +
+TODO + CHANGELOG); no source changed.
+
+---
+
 ## Entry [2026-06-28] — API docs completed as a standalone integration contract + GET /manufacturers/{id} fix (agent: claude, api-docs)
 
 A verification fan-out first confirmed the integration posture: **every capability is already

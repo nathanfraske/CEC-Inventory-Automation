@@ -84,6 +84,31 @@ merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.m
   endpoints, and the real poller binary. Real carrier APIs / aggregator remain open (INV-OQ-30).
 - [ ] **[2026-06-27]** Wire a real carrier provider (USPS/UPS/FedEx/DHL direct, or an
   aggregator) behind the `CarrierProvider` trait; today only `none`/`mock` exist (INV-OQ-30).
+  **DECIDED [2026-06-28] (D-025): EasyPost** (auto-detects carrier from a bare tracking #), Ship24
+  fallback. Build phase 1 in `docs/DESIGN-procurement-intake.md`.
+
+## Open — automated procurement intake (DESIGN ready [2026-06-28]: D-024/D-025/D-026, `docs/DESIGN-procurement-intake.md`)
+
+Email-in → drafted purchases + tracked shipments + reverse flow (cancel/return/exchange), on-box,
+operator-confirmed. Phased build:
+- [ ] **[2026-06-28]** Phase 1 — real `CarrierProvider` (**TrackingMore** free tier primary — polling
+  fits the poller, $0 at this volume; EasyPost the push alt) so the poller tracks live shipments
+  (D-025). Free *direct* path rejected (USPS retired free tracking).
+- [ ] **[2026-06-28]** Phase 2 — **Connections** store (D-026): `connection` table + encrypted
+  write-only secrets + `/connections` API + `/ui/connections` admin page; link Gmail/Amazon/carrier
+  without `.env` edits. Foundational.
+- [ ] **[2026-06-28]** Phase 3 — `crates/email-ingest` worker: `EmailProvider` + Gmail (IMAP app
+  password) + mock; reads `active` Gmail connections; `Vendors/{Processing,Ingested,Error}` flow;
+  Message-ID dedup; sender-whitelist + DKIM.
+- [ ] **[2026-06-28]** Phase 4 — extractor `POST /extract-email` (on-box **text** model →
+  §11.4 + ingest hints: `event_type`, `vendor_order_number`, `carrier`/`tracking_number`).
+- [ ] **[2026-06-28]** Phase 5 — `POST /purchases/ingest` (order-keyed, idempotent
+  create/enrich/flag) + migration `0007` (`email_message_id`, `vendor_order_number`, `intake_status`,
+  line `line_status`).
+- [ ] **[2026-06-28]** Phase 6 — wire forward + **reverse** end-to-end (confirm→draft, ship→shipment,
+  cancel/decline→flag, return/exchange/refund→RMA suggestions §7a); test against real samples.
+- [ ] **[2026-06-28]** Phase 7 — Amazon Business API enrichment for the missing tax/shipping/total
+  on Amazon orders. (Verify which Amazon Business API access exists — design §14 Q2.)
 
 ## Open — audit remediation backlog (panels ran 2026-06-27; full list in docs/AUDIT-2026-06-27.md)
 

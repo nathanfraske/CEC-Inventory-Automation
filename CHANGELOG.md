@@ -8,6 +8,12 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Docs — 2026-06-28 — Design: automated procurement intake (email ingest + carrier tracking)
+- `docs/DESIGN-procurement-intake.md` (new) + decisions **D-024** (email-ingest worker → order-keyed
+  idempotent `POST /purchases/ingest`, on-box LLM extraction, Gmail IMAP) and **D-025** (EasyPost as
+  the first real `CarrierProvider`; reject retailer-account scraping for email-sourced tracking
+  numbers). Design only — no code yet; 6-phase build plan + open questions in the doc.
+
 ### Added / Fixed — 2026-06-28 — Complete API integration docs + GET /manufacturers/{id}
 - `docs/API.md`: new **§ Endpoint schemas** — field-level request/response shapes for all 73
   endpoints (incl. auth/token management), generated from the handler source. Added the 3
