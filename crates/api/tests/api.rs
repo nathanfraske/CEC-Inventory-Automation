@@ -1361,6 +1361,38 @@ async fn phase1_extract_preview_502_when_unreachable() {
 }
 
 #[tokio::test]
+async fn vlm_job_404_for_unknown_id() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+    let resp = c
+        .get(format!(
+            "{base}/purchases/from-image-jobs/{}",
+            uuid::Uuid::new_v4()
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 404);
+}
+
+#[tokio::test]
+async fn vlm_status_degrades_gracefully_when_extractor_unreachable() {
+    let Some(base) = spawn().await else { return };
+    // The warm-status proxy is best-effort: it returns 200 with a cold/unknown shape rather than
+    // erroring when the extractor/broker is unreachable, so the UI degrades to "warming".
+    std::env::set_var("EXTRACTOR_URL", "http://127.0.0.1:9");
+    let c = reqwest::Client::new();
+    let resp = c
+        .get(format!("{base}/extract/vlm-status"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body.get("warm").and_then(|w| w.as_bool()), Some(false));
+}
+
+#[tokio::test]
 async fn ui_pages_render() {
     let Some(base) = spawn().await else { return };
     let c = reqwest::Client::new();

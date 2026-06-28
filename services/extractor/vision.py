@@ -273,3 +273,50 @@ def extract_image(
     image_b64 = base64.b64encode(image_bytes).decode("ascii")
     raw = _parse_json(transport(image_b64, media_type))
     return _normalize(raw, vendor_hint, engine)
+
+
+def vlm_status() -> dict:
+    """Report whether the configured vision model is *warm* (resident on the broker) so the UI can
+    show a 'warming' vs 'ready' state before/while extracting. Best-effort — never raises.
+
+    For ``openai`` it asks the broker's ``/models`` catalog for the model's ``running`` flag. For
+    ``stub`` (instant) and ``claude`` (hosted, no local cold load) it reports warm.
+    """
+    backend = os.environ.get("EXTRACTOR_VLM_BACKEND", "stub").lower()
+    model = os.environ.get("EXTRACTOR_VLM_MODEL") or None
+    if backend != "openai":
+        return {
+            "backend": backend,
+            "model": model,
+            "warm": True,
+            "detail": "no local model load for this backend",
+        }
+    base = os.environ.get("EXTRACTOR_VLM_BASE_URL")
+    if not base or not model:
+        return {
+            "backend": backend,
+            "model": model,
+            "warm": False,
+            "detail": "EXTRACTOR_VLM_BASE_URL/EXTRACTOR_VLM_MODEL not set",
+        }
+    try:
+        req = urllib.request.Request(base.rstrip("/") + "/models", method="GET")
+        with urllib.request.urlopen(req, timeout=5) as r:  # noqa: S310 (host from env)
+            data = json.loads(r.read().decode("utf-8"))
+        for m in data.get("data", []):
+            if m.get("id") == model:
+                running = bool(m.get("running"))
+                return {
+                    "backend": backend,
+                    "model": model,
+                    "warm": running,
+                    "detail": "running" if running else "cold (loads on first extract)",
+                }
+        return {"backend": backend, "model": model, "warm": False, "detail": "model not in catalog"}
+    except Exception as e:  # noqa: BLE001  (status is advisory; degrade to 'cold')
+        return {
+            "backend": backend,
+            "model": model,
+            "warm": False,
+            "detail": f"broker status unavailable: {e.__class__.__name__}",
+        }

@@ -3,13 +3,16 @@
 //! into draft `PurchaseLineItem`s for operator confirmation. The extractor runs on the
 //! inference box, so this is a best-effort call: a 502 is returned when it is unreachable.
 
-use axum::extract::{Multipart, State};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use axum::extract::{Multipart, Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use base64::Engine;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use rust_decimal::Decimal;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -23,11 +26,24 @@ fn extractor_url() -> String {
     std::env::var("EXTRACTOR_URL").unwrap_or_else(|_| "http://inference-box:8900".to_string())
 }
 
+/// HTTP client for extractor calls with bounded timeouts: a fast connect timeout (a down extractor
+/// fails quickly) and a generous request timeout (a cold VLM load can take a couple of minutes).
+/// Without this, a wedged broker would hang the call forever — and in the async flow, leave the
+/// background task (and the uploaded image it holds) leaked with the job stuck `processing`. A
+/// timeout instead surfaces an `Upstream` error, which the async task maps to a `failed` job.
+fn extractor_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 /// POST text to the extractor and return its structured JSON.
 pub async fn extract_text(text: &str, vendor_hint: Option<&str>) -> ApiResult<Value> {
     let url = format!("{}/extract", extractor_url().trim_end_matches('/'));
     let body = serde_json::json!({ "text": text, "vendor_hint": vendor_hint });
-    let resp = reqwest::Client::new()
+    let resp = extractor_client()
         .post(&url)
         .json(&body)
         .send()
@@ -59,7 +75,7 @@ pub async fn extract_image(
         "media_type": media_type,
         "vendor_hint": vendor_hint,
     });
-    let resp = reqwest::Client::new()
+    let resp = extractor_client()
         .post(&url)
         .json(&body)
         .send()
@@ -265,13 +281,12 @@ pub async fn create_from_extraction(
     Ok((StatusCode::CREATED, Json(summary)))
 }
 
-/// Extract an uploaded receipt **image** via the vision backend AND persist it as a draft
-/// purchase (scope §11.2). Multipart: the first file field is the image; optional text fields
-/// `vendor_hint` / `created_by`. The source type is recorded as `physical_photo`.
-pub async fn create_from_image(
-    State(s): State<AppState>,
+/// Parse the receipt-image multipart: the first file field is the image; optional text fields
+/// `vendor_hint` / `created_by`. Whitelists the forwarded media type (defaulting unknown to jpeg)
+/// and caps the free-text fields that flow into the prompt / persisted vendor / event actor.
+async fn parse_image_upload(
     mut multipart: Multipart,
-) -> ApiResult<(StatusCode, Json<Value>)> {
+) -> ApiResult<(String, Vec<u8>, Option<String>, Option<String>)> {
     let mut image: Option<(String, Vec<u8>)> = None; // (media_type, bytes)
     let mut vendor_hint: Option<String> = None;
     let mut created_by: Option<String> = None;
@@ -305,17 +320,27 @@ pub async fn create_from_image(
     if bytes.is_empty() {
         return Err(ApiError::BadRequest("uploaded image is empty".into()));
     }
-    // Whitelist the media type forwarded to the vision backend; default unknown to jpeg.
     const ALLOWED: &[&str] = &["image/jpeg", "image/png", "image/webp", "image/gif"];
     let media_type = if ALLOWED.contains(&media_type.as_str()) {
         media_type
     } else {
         "image/jpeg".to_string()
     };
-    // Cap free-text fields that flow into the prompt / persisted vendor / event actor.
     let vendor_hint = vendor_hint.map(|v| v.chars().take(200).collect::<String>());
     let created_by = created_by.map(|v| v.chars().take(200).collect::<String>());
+    Ok((media_type, bytes, vendor_hint, created_by))
+}
 
+/// Extract an uploaded receipt **image** via the vision backend AND persist it as a draft
+/// purchase (scope §11.2). Multipart: the first file field is the image; optional text fields
+/// `vendor_hint` / `created_by`. The source type is recorded as `physical_photo`. Synchronous:
+/// blocks until the vision backend returns (which can be slow on a cold model). For a
+/// non-blocking, warming-aware flow see `create_from_image_async`.
+pub async fn create_from_image(
+    State(s): State<AppState>,
+    multipart: Multipart,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let (media_type, bytes, vendor_hint, created_by) = parse_image_upload(multipart).await?;
     let extraction = extract_image(&bytes, &media_type, vendor_hint.as_deref()).await?;
     let summary = persist_extraction(
         &s.db,
@@ -326,6 +351,156 @@ pub async fn create_from_image(
     )
     .await?;
     Ok((StatusCode::CREATED, Json(summary)))
+}
+
+/// In-memory record of an async receipt-image extraction (scope §11.2 UX). Ephemeral: jobs live
+/// in process memory only and are pruned after 30 min; an api restart drops them (the operator
+/// just re-uploads). There is a single api process, so this needs no cross-instance durability.
+#[derive(Clone, Serialize)]
+pub struct VlmJob {
+    /// `processing` | `ready` | `failed`.
+    pub status: String,
+    /// Was the vision model resident when the job started? Lets the UI show 'warming' vs 'extracting'.
+    pub model_warm: bool,
+    /// The persisted draft-purchase summary, once `ready`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purchase: Option<Value>,
+    /// Failure detail if the extract/persist errored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Unix seconds at creation (for opportunistic pruning).
+    pub created_at: i64,
+}
+
+/// Shared, in-memory async-extraction job table (held in `AppState`).
+pub type VlmJobs = Arc<Mutex<HashMap<Uuid, VlmJob>>>;
+
+fn now_secs() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Ask the extractor whether the configured vision model is warm (resident). Best-effort: returns
+/// a JSON status object; on any failure returns a cold/unknown shape rather than erroring, so the
+/// UI degrades to "warming" rather than breaking.
+pub async fn vlm_status() -> Value {
+    let url = format!("{}/vlm-status", extractor_url().trim_end_matches('/'));
+    match reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(6))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r
+            .json::<Value>()
+            .await
+            .unwrap_or_else(|_| json!({ "warm": false, "detail": "bad status json" })),
+        Ok(r) => json!({ "warm": false, "detail": format!("extractor returned {}", r.status()) }),
+        Err(e) => json!({ "warm": false, "detail": format!("extractor unreachable: {e}") }),
+    }
+}
+
+/// `GET /extract/vlm-status` — surface the extractor's warm-status to the authed UI.
+pub async fn vlm_status_route(State(_s): State<AppState>) -> Json<Value> {
+    Json(vlm_status().await)
+}
+
+/// `POST /purchases/from-image-async` — non-blocking receipt-image extraction. Registers an
+/// in-memory job and returns its id immediately (202); a background task resolves whether the
+/// model is warm and then runs extract + persist. The UI polls the job (whose `model_warm` and
+/// `status` fields drive the 'warming' vs 'extracting' display) instead of holding the request
+/// open across a (possibly cold) model load.
+pub async fn create_from_image_async(
+    State(s): State<AppState>,
+    multipart: Multipart,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let (media_type, bytes, vendor_hint, created_by) = parse_image_upload(multipart).await?;
+
+    let job_id = Uuid::new_v4();
+    let now = now_secs();
+    {
+        let mut jobs = s
+            .vlm_jobs
+            .lock()
+            .map_err(|_| ApiError::Internal(anyhow::anyhow!("vlm job lock poisoned")))?;
+        jobs.retain(|_, j| now - j.created_at < 1800); // prune jobs older than 30 min
+        jobs.insert(
+            job_id,
+            VlmJob {
+                status: "processing".into(),
+                model_warm: false, // resolved by the task's warm probe below
+                purchase: None,
+                error: None,
+                created_at: now,
+            },
+        );
+    }
+
+    // Keep the 202 truly immediate: do the warm probe (and everything slow) off the request path.
+    // The task resolves `model_warm` first so the UI's next poll can show 'warming' vs 'extracting',
+    // then runs extract + persist.
+    let st = s.clone();
+    tokio::spawn(async move {
+        let warm = vlm_status()
+            .await
+            .get("warm")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if let Ok(mut jobs) = st.vlm_jobs.lock() {
+            if let Some(job) = jobs.get_mut(&job_id) {
+                job.model_warm = warm;
+            }
+        }
+        let outcome = async {
+            let extraction = extract_image(&bytes, &media_type, vendor_hint.as_deref()).await?;
+            persist_extraction(
+                &st.db,
+                &extraction,
+                None,
+                created_by.as_deref(),
+                SourceType::PhysicalPhoto,
+            )
+            .await
+        }
+        .await;
+        if let Ok(mut jobs) = st.vlm_jobs.lock() {
+            if let Some(job) = jobs.get_mut(&job_id) {
+                match outcome {
+                    Ok(summary) => {
+                        job.status = "ready".into();
+                        job.purchase = Some(summary);
+                    }
+                    Err(e) => {
+                        job.status = "failed".into();
+                        job.error = Some(format!("{e:?}"));
+                    }
+                }
+            }
+        }
+    });
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({ "job_id": job_id, "status": "processing" })),
+    ))
+}
+
+/// `GET /purchases/from-image-jobs/{id}` — poll an async extraction job.
+pub async fn get_vlm_job(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<VlmJob>> {
+    let jobs = s
+        .vlm_jobs
+        .lock()
+        .map_err(|_| ApiError::Internal(anyhow::anyhow!("vlm job lock poisoned")))?;
+    jobs.get(&id)
+        .cloned()
+        .map(Json)
+        .ok_or_else(|| ApiError::NotFound("extraction job not found (it may have expired)".into()))
 }
 
 #[derive(Deserialize)]

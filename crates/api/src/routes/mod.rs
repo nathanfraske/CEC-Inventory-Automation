@@ -135,11 +135,26 @@ pub fn router() -> Router<AppState> {
             "/purchases/from-extraction",
             post(crate::extractor::create_from_extraction),
         )
-        // receipt image → draft purchase via the vision backend (interim VLM path, scope §11.2)
+        // receipt image → draft purchase via the vision backend (scope §11.2)
         .route(
             "/purchases/from-image",
             post(crate::extractor::create_from_image)
                 .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
+        )
+        // async (non-blocking) variant + job poll + warm-status, so the UI can show whether the
+        // vision model is warming vs already warm instead of holding the request open (§11.2 UX)
+        .route(
+            "/purchases/from-image-async",
+            post(crate::extractor::create_from_image_async)
+                .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
+        )
+        .route(
+            "/purchases/from-image-jobs/{id}",
+            get(crate::extractor::get_vlm_job),
+        )
+        .route(
+            "/extract/vlm-status",
+            get(crate::extractor::vlm_status_route),
         )
         // persist a caller-supplied §11.4 payload (external/operator vision pass)
         .route(

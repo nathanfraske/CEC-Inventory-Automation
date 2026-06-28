@@ -79,6 +79,54 @@ async function cecUpload(form){
   }catch(e){ if(out){ out.textContent='✗ '+e; out.className='result err'; } }
   return false;
 }
+async function cecExtractImage(form){
+  const out = form.querySelector('.result');
+  const fd = new FormData();
+  form.querySelectorAll('[name]').forEach(el=>{
+    if(el.type==='file'){ if(el.files[0]) fd.append(el.name, el.files[0]); }
+    else if(el.value!=='') fd.append(el.name, el.value);
+  });
+  if(!fd.has('file')){ if(out){ out.textContent='✗ choose a photo first'; out.className='result err'; } return false; }
+  if(out){ out.textContent='Uploading…'; out.className='result'; }
+  let job;
+  try{
+    const r = await fetch(form.action,{method:'POST',body:fd});
+    job = await r.json();
+    if(!r.ok || !job.job_id){ if(out){ out.textContent='✗ '+r.status+' '+JSON.stringify(job); out.className='result err'; } return false; }
+  }catch(e){ if(out){ out.textContent='✗ '+e; out.className='result err'; } return false; }
+  const started = Date.now();
+  const DEADLINE = 8*60*1000;   // give up after 8 min (well past a cold load + extract)
+  let warming = true, errs = 0;
+  while(true){
+    if(Date.now()-started > DEADLINE){ if(out){ out.textContent='✗ timed out waiting for extraction; please retry'; out.className='result err'; } return false; }
+    const secs = Math.round((Date.now()-started)/1000);
+    if(out){ out.textContent = (warming ? '⏳ Warming the vision model (first scan, ~30–90s)… ' : '⏳ Extracting… ') + secs + 's'; out.className='result'; }
+    await new Promise(res=>setTimeout(res,2000));
+    let j;
+    try{
+      const jr = await fetch('/purchases/from-image-jobs/'+job.job_id);
+      if(jr.status===404){ if(out){ out.textContent='✗ job expired; please retry'; out.className='result err'; } return false; }
+      j = await jr.json(); errs = 0;
+    }catch(e){ if(++errs>=5){ if(out){ out.textContent='✗ lost contact with the server; please retry'; out.className='result err'; } return false; } continue; }
+    warming = !j.model_warm;
+    if(j.status==='ready'){
+      if(out){ out.textContent='✓ Extracted — opening the draft purchase to confirm…'; out.className='result ok'; }
+      location.href = form.dataset.redirect || '/ui/purchases';
+      return false;
+    }
+    if(j.status==='failed'){ if(out){ out.textContent='✗ extraction failed: '+(j.error||'unknown'); out.className='result err'; } return false; }
+  }
+}
+async function cecVlmStatus(){
+  const el = document.getElementById('vlm-status'); if(!el) return;
+  try{
+    const r = await fetch('/extract/vlm-status'); const s = await r.json();
+    if(s.backend && s.backend!=='openai'){ el.textContent='Vision: '+s.backend+' backend'; el.className='muted'; return; }
+    el.textContent = (s.warm ? '● vision model warm' : '○ vision model cold — first scan will warm it') + (s.model ? ' ('+s.model+')' : '');
+    el.className = s.warm ? 'ok' : 'muted';
+  }catch(e){ el.textContent='vision status unavailable'; el.className='muted'; }
+}
+document.addEventListener('DOMContentLoaded',()=>{ if(document.getElementById('vlm-status')) cecVlmStatus(); });
 "#;
 
 fn nav(user: Option<&str>) -> String {
@@ -405,16 +453,18 @@ receipt below.</p>\
 \
 <h2>Receipt → draft purchase (scope §3/§11)</h2>\
 <p class=\"muted\">Paste a receipt's text, or upload a photo. Both create a draft purchase with \
-<b>unresolved</b> line items for you to map to products. The image path uses the extractor's \
-vision backend (<code>stub</code> until <code>EXTRACTOR_VLM_BACKEND=claude</code> or the local \
-VLM is wired); the deterministic template path handles known vendors' pasted text.</p>\
+<b>unresolved</b> line items for you to map to products. The image path reads the photo on the \
+on-box vision model via the local broker (the image never leaves the box, scope §11.2); it runs \
+asynchronously and shows whether the model is warming or already warm. The deterministic template \
+path handles known vendors' pasted text.</p>\
 <form class=\"cec\" action=\"/purchases/from-extraction\" data-redirect=\"/ui/purchases\" onsubmit=\"return cecSubmit(this)\">\
 <label>Receipt text</label><textarea name=\"text\" data-required=\"1\" rows=\"5\" placeholder=\"Micro Center\\nOrder # MC-10293\\n1 x RTX 4090  SKU:GPU1  SN:GPU-2291X  $1599.00  $1599.00\\nTotal $1599.00\"></textarea>\
 <label>Vendor hint (optional)</label><input name=\"vendor_hint\">\
 <button>Extract from text</button><pre class=\"result\"></pre></form>\
-<form class=\"cec\" action=\"/purchases/from-image\" data-redirect=\"/ui/purchases\" onsubmit=\"return cecUpload(this)\">\
+<form class=\"cec\" action=\"/purchases/from-image-async\" data-redirect=\"/ui/purchases\" onsubmit=\"return cecExtractImage(this)\">\
 <label>Receipt photo</label><input name=\"file\" type=\"file\" accept=\"image/*\" capture=\"environment\">\
 <label>Vendor hint (optional)</label><input name=\"vendor_hint\">\
+<p id=\"vlm-status\" class=\"muted\">checking vision model…</p>\
 <button>Extract from image</button><pre class=\"result\"></pre></form>\
 \
 <h2>Vendor</h2>\

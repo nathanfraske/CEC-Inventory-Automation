@@ -16,11 +16,12 @@ merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.m
 - [x] **Wire the real receipt vision to the local broker.** ✅ DONE [2026-06-27] — added an
   `openai` vision backend in `services/extractor/vision.py` (OpenAI `/chat/completions`, data-URI
   image), wired `EXTRACTOR_VLM_*` + `extra_hosts: host.docker.internal:host-gateway` through
-  compose, set `.env` to `openai` + `cec-worker-vision`. Live test: receipt image → broker →
-  Qwen3-VL → correct §11.4 JSON (vendor/lines/serials/totals), `engine=vlm_openai`, images stay
-  on-box (§11.2). D-020. REMAINING: OpenCV long-receipt `/stitch` (still a placeholder); perf —
-  the default 35B seat runs experts in host RAM (`--n-cpu-moe`) and is slow on warm inference,
-  so consider the `cec-vision-judge` (Qwen3-VL-32B) seat or a higher broker GPU budget.
+  compose, `.env` `openai` + `cec-vision-judge` (Qwen3-VL-32B). Made it **async** (D-021):
+  `from-image-async` + job poll + `/extract/vlm-status`, UI shows warming-vs-warm, with a
+  keep-warm script + systemd timer. Live test: receipt image → broker → Qwen3-VL → correct §11.4
+  JSON (vendor/lines/serials/totals), `engine=vlm_openai`, images stay on-box (§11.2). D-020/D-021.
+  REMAINING: OpenCV long-receipt `/stitch` (still a placeholder); decide whether to enable the
+  keep-warm timer (holds ~21 GB VRAM).
 - [ ] **Stand up scheduled backups:** install `scripts/systemd/cec-backup.{service,timer}`, set
   `BACKUP_AGE_RECIPIENT` (encryption) + an offsite target; verify with `scripts/restore_drill.sh`.
 

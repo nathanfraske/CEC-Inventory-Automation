@@ -37,6 +37,9 @@ pub struct AppState {
     pub cookie_key: Key,
     /// In-memory failed-login counter for the brute-force throttle (scope §18 hardening).
     pub login_throttle: auth::LoginThrottle,
+    /// In-memory async receipt-image extraction jobs (scope §11.2 UX). Ephemeral: process-local,
+    /// pruned after 30 min; an api restart drops them (the operator just re-uploads).
+    pub vlm_jobs: extractor::VlmJobs,
 }
 
 // Lets the `SignedCookieJar` extractor pull the signing key out of the app state.
@@ -86,6 +89,7 @@ pub async fn build_state() -> anyhow::Result<AppState> {
         login_throttle: std::sync::Arc::new(
             std::sync::Mutex::new(std::collections::HashMap::new()),
         ),
+        vlm_jobs: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     })
 }
 

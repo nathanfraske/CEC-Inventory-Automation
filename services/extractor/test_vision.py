@@ -148,6 +148,63 @@ def test_openai_transport_builds_openai_chat_request():
     assert '"vendor":"Newegg"' in text  # transport returns the model's text for the parser
 
 
+def test_vlm_status_stub_is_warm():
+    import os
+
+    prev = os.environ.get("EXTRACTOR_VLM_BACKEND")
+    os.environ["EXTRACTOR_VLM_BACKEND"] = "stub"
+    try:
+        s = vision.vlm_status()
+        assert s["backend"] == "stub" and s["warm"] is True
+    finally:
+        if prev is None:
+            os.environ.pop("EXTRACTOR_VLM_BACKEND", None)
+        else:
+            os.environ["EXTRACTOR_VLM_BACKEND"] = prev
+
+
+def test_vlm_status_openai_reads_broker_running_flag():
+    import os
+    import urllib.request
+
+    class _FakeResp:
+        def __init__(self, body):
+            self._body = body
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _fake_urlopen(req, timeout=None):
+        assert req.full_url.endswith("/v1/models")
+        return _FakeResp(
+            json.dumps(
+                {"data": [{"id": "other", "running": True}, {"id": "cec-vision-judge", "running": True}]}
+            ).encode("utf-8")
+        )
+
+    keys = ("EXTRACTOR_VLM_BACKEND", "EXTRACTOR_VLM_BASE_URL", "EXTRACTOR_VLM_MODEL")
+    prev = {k: os.environ.get(k) for k in keys}
+    real = urllib.request.urlopen
+    os.environ["EXTRACTOR_VLM_BACKEND"] = "openai"
+    os.environ["EXTRACTOR_VLM_BASE_URL"] = "http://broker:8080/v1"
+    os.environ["EXTRACTOR_VLM_MODEL"] = "cec-vision-judge"
+    urllib.request.urlopen = _fake_urlopen
+    try:
+        s = vision.vlm_status()
+    finally:
+        urllib.request.urlopen = real
+        for k, v in prev.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
+    assert s["backend"] == "openai" and s["model"] == "cec-vision-judge" and s["warm"] is True
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

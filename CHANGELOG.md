@@ -8,6 +8,21 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-27 — Async receipt-vision flow (warming-aware) + keep-warm
+- `POST /purchases/from-image-async` + `GET /purchases/from-image-jobs/{id}` + `GET
+  /extract/vlm-status`: non-blocking receipt-image extraction via an in-memory job, so the UI
+  shows 'warming' vs 'extracting' and never holds the request open across a cold model load. The
+  extractor gained `GET /vlm-status` (broker running flag). Bounded api→extractor timeouts
+  (connect 10 s / request 300 s) turn a wedged broker into a failed job; the UI poll has an 8-min
+  deadline + error surfacing. Decision D-021.
+- `scripts/vlm_keepwarm.sh` + `scripts/systemd/cec-vlm-keepwarm.{service,timer}` keep the vision
+  seat resident (model read from the gitignored `.env`; opt-in like the backup timer).
+
+### Changed — 2026-06-27 — Vision seat = cec-vision-judge; reqwest rustls-only (drop openssl)
+- This box's default receipt-vision model is `cec-vision-judge` (Qwen3-VL-32B, GPU-resident).
+- `reqwest` set to `default-features = false` (rustls-tls only) — removes `openssl-sys`/native-tls
+  from the dependency tree and the images (matches sqlx `tls-rustls`; supply-chain hardening).
+
 ### Added — 2026-06-27 — On-box receipt vision via an OpenAI-compatible backend
 - `services/extractor/vision.py` gains an `openai` backend (`EXTRACTOR_VLM_BACKEND=openai`) that
   POSTs the receipt image to an OpenAI-compatible `/chat/completions` endpoint as a data-URI

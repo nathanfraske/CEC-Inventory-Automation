@@ -58,6 +58,13 @@ def extract(req: ExtractRequest) -> dict:
     return extractor.extract(req.text, req.vendor_hint)
 
 
+@app.get("/vlm-status")
+def vlm_status() -> dict:
+    # Whether the configured vision model is warm (resident) — lets the API/UI show a
+    # 'warming' vs 'ready' state before/while extracting. Best-effort; never raises.
+    return vision.vlm_status()
+
+
 @app.post("/extract-image")
 def extract_image(req: ExtractImageRequest) -> dict:
     data = base64.b64decode(req.image_base64)

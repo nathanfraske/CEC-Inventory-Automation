@@ -1,0 +1,19 @@
+# CEC receipt-vision keep-warm — pings the cec-llm-broker so the vision model stays resident
+# (no cold-load on the operator's first scan). Install on the box:
+#   sudo cp scripts/systemd/cec-vlm-keepwarm.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now cec-vlm-keepwarm.timer
+# Adjust WorkingDirectory/User to your checkout + operator account. Override the target model via
+# the Environment line below (defaults: 127.0.0.1:8080/v1, cec-vision-judge).
+[Unit]
+Description=CEC receipt-vision keep-warm (ping the broker so the model stays resident)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/cec-inventory
+User=cec
+# Environment=CEC_VLM_KEEPWARM_MODEL=cec-vision-judge
+ExecStart=/opt/cec-inventory/scripts/vlm_keepwarm.sh
+StandardOutput=journal
+StandardError=journal

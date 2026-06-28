@@ -6,6 +6,39 @@
 
 ---
 
+## Entry [2026-06-27] — Async receipt-vision flow + cec-vision-judge seat + keep-warm (agent: claude, async extract)
+
+Made receipt-image extraction **asynchronous** so the operator UI never blocks on a (possibly
+cold) vision load and clearly shows **warming vs warm**:
+- **API:** `POST /purchases/from-image-async` registers an in-memory job (AppState `vlm_jobs`,
+  pruned at 30 min) and returns `202 {job_id}` immediately; a background tokio task resolves the
+  warm-state then runs extract + persist. `GET /purchases/from-image-jobs/{id}` polls
+  (`status` + `model_warm`); `GET /extract/vlm-status` reports warm state. The extractor gained
+  `GET /vlm-status` (reads the broker `/v1/models` running flag). The UI polls and labels
+  "Warming…" vs "Extracting…", then opens the draft purchase to confirm (D-021).
+- **Vision seat → `cec-vision-judge`** (Qwen3-VL-32B, GPU-resident) per the owner;
+  `.env EXTRACTOR_VLM_MODEL=cec-vision-judge`.
+- **Keep-warm:** `scripts/vlm_keepwarm.sh` (pings the broker; model read from `.env`) +
+  `scripts/systemd/cec-vlm-keepwarm.{service,timer}` (every 20 min, under the broker's 30-min idle
+  reap) so the seat stays resident. Opt-in like the backup timer; **NOT yet installed.**
+- **Supply-chain:** reqwest switched to `default-features=false` (rustls only) — `openssl-sys` is
+  gone from the dependency tree/image (matches sqlx `tls-rustls`; audit supply-chain item).
+
+**Live-validated:** cold submit → immediate 202, job `model_warm:false`, polled through the
+~159 s cec-vision-judge cold-load → `ready` with a draft (vendor / 3 lines / per-line serials,
+engine `vlm_openai`); warm submit → `model_warm:true`, ~8 s. 29 tests green (10 unit + 19
+integration, incl. 2 new async ones), fmt + clippy clean.
+
+Hardening from an adversarial review (6 confirmed findings, all fixed): bounded timeouts on the
+api→extractor client (connect 10 s / request 300 s) so a wedged broker **fails** the job instead
+of hanging and leaking the task+image; the warm probe moved off the 202 path (truly immediate);
+the UI poll gained an 8-min deadline + poll-error surfacing; keep-warm model sourced from `.env`.
+
+Follow-ups: OpenCV `/stitch` still a placeholder; enabling the keep-warm timer (holds ~21 GB VRAM)
+is the operator's call; a first cold scan after 30-min idle is ~2-3 min unless the timer runs.
+
+---
+
 ## Entry [2026-06-27] — On-box receipt vision wired to the cec-llm-broker (agent: claude, extractor vision)
 
 The receipt-**image** path now runs **on-box**. Added an `openai` backend to

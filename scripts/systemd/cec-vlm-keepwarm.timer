@@ -1,0 +1,15 @@
+# Schedule for cec-vlm-keepwarm.service. Ticks every 20 min — under the broker's idle_stop
+# (default 30 min) so the vision model never reaps between scans. Enable with:
+#   sudo systemctl enable --now cec-vlm-keepwarm.timer
+# Check: systemctl list-timers cec-vlm-keepwarm.timer ; journalctl -u cec-vlm-keepwarm.service
+# Disable when you need the GPU/VRAM for other CEC tools — the model then idle-reaps as usual.
+[Unit]
+Description=Keep the CEC receipt-vision model warm on the broker
+
+[Timer]
+OnBootSec=2min
+OnCalendar=*:0/20
+Persistent=true
+
+[Install]
+WantedBy=timers.target
