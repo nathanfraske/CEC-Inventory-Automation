@@ -390,6 +390,44 @@ async fn phase1_landed_cost_and_shipment_tracking() {
 }
 
 #[tokio::test]
+async fn manufacturer_get_one_and_404() {
+    let Some(base) = spawn().await else { return };
+    let c = reqwest::Client::new();
+
+    let mfr: Value = c
+        .post(format!("{base}/manufacturers"))
+        .json(&json!({ "name": "Corsair", "default_warranty_months": 24 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = mfr["id"].as_str().unwrap().to_string();
+
+    // GET /manufacturers/{id} (newly mounted) round-trips the created row.
+    let got: Value = c
+        .get(format!("{base}/manufacturers/{id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(got["id"], mfr["id"]);
+    assert_eq!(got["name"], "Corsair");
+    assert_eq!(got["default_warranty_months"], 24);
+
+    // A random id is a clean 404, not a 500.
+    let missing = c
+        .get(format!("{base}/manufacturers/{}", uuid::Uuid::new_v4()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), 404);
+}
+
+#[tokio::test]
 async fn phase3_warranty_recompute_and_readiness() {
     let Some(base) = spawn().await else { return };
     let c = reqwest::Client::new();

@@ -1,6 +1,6 @@
 # TODO — work queue
 
-> Last updated: 2026-06-27 · Dating + tombstoning rules: `CLAUDE.md` §3.
+> Last updated: 2026-06-28 · Dating + tombstoning rules: `CLAUDE.md` §3.
 > Open items are dated on creation. Completed/obsolete items move to "Done / Tombstoned"
 > with a dated tag — never silently deleted.
 
@@ -155,6 +155,13 @@ merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.m
 ---
 
 ## Done / Tombstoned
+
+- ✅ DONE [2026-06-28] API integration docs completed as a standalone contract: field-level
+  request/response schemas for all 73 endpoints in `docs/API.md` (§ Endpoint schemas) + the 3 async
+  endpoints + 202/500 status codes; `docs/INTEGRATION.md` token-lifecycle/limits/conventions; and
+  the `GET /manufacturers/{id}` mount fix (+ test). → HANDOFF [2026-06-28] (api-docs). New small
+  follow-up: switch `phase2_verify_and_asset_tags` hardcoded serials to the `sn()` helper; consider
+  a dedicated test DB so local `cargo test` doesn't write into the dev DB.
 
 - ✅ DONE [2026-06-27] Add mechanical §3-protocol enforcement hooks: Claude Code **Stop**
   (`.claude/hooks/enforce-doc-compliance.sh`, blocks code-without-docs) + **PostToolUse**

@@ -38,6 +38,7 @@ pub fn router() -> Router<AppState> {
             "/manufacturers",
             post(catalog::create_manufacturer).get(catalog::list_manufacturers),
         )
+        .route("/manufacturers/{id}", get(catalog::get_manufacturer))
         .route(
             "/products",
             post(catalog::create_product).get(catalog::list_products),

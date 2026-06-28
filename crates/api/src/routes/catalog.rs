@@ -157,6 +157,21 @@ pub async fn list_manufacturers(State(s): State<AppState>) -> ApiResult<Json<Vec
     Ok(Json(rows))
 }
 
+pub async fn get_manufacturer(
+    State(s): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Manufacturer>> {
+    // Uses MANUFACTURER_COLS (not `*`) so the two enum columns come back cast to text, matching
+    // create/list. fetch_optional → 404 rather than a 500 on a missing id.
+    let sql = format!("SELECT {MANUFACTURER_COLS} FROM manufacturer WHERE id = $1");
+    let m = sqlx::query_as::<_, Manufacturer>(&sql)
+        .bind(id)
+        .fetch_optional(&s.db)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("manufacturer not found".into()))?;
+    Ok(Json(m))
+}
+
 // ---------------- products ----------------
 
 #[derive(Serialize, FromRow)]

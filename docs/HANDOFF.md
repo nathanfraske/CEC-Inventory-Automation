@@ -1,8 +1,37 @@
 # HANDOFF — current state of the build
 
-> Last updated: 2026-06-27 · Append a new dated entry per session; never overwrite history.
+> Last updated: 2026-06-28 · Append a new dated entry per session; never overwrite history.
 > Read this with `docs/TODO.md` (work queue) and `CLAUDE.md` (operating contract).
 > Dating + tombstoning rules: `CLAUDE.md` §3.
+
+---
+
+## Entry [2026-06-28] — API docs completed as a standalone integration contract + GET /manufacturers/{id} fix (agent: claude, api-docs)
+
+A verification fan-out first confirmed the integration posture: **every capability is already
+bearer-reachable** (86 routes; 75 authed all accept `Authorization: Bearer cec_pat_…` via one
+`resolve_role` path; CSRF only gates cookie callers; zero UI/cookie-only features). So this was a
+**docs + one-route-fix** task, not a capability gap.
+
+- **`docs/API.md`** gained a **§ Endpoint schemas** section: field-level request + response shapes
+  for all 73 endpoints (incl. auth/token mgmt), extracted from the handler source via an 8-way
+  fan-out and spot-verified against the code (catalog/extractor sections checked by hand). Also
+  added the 3 async extraction endpoints to the catalog tables and the `202`/`500` status codes +
+  the FK-`400` vs unique-`409` distinction.
+- **`docs/INTEGRATION.md`**: token lifecycle (no expiry/scopes, rotate operationally), body-size
+  limits, ISO-8601 UTC timestamps, query params, status-code table.
+- **Bug fix:** `GET /manufacturers/{id}` was never mounted (vendors + products had GET-one;
+  manufacturers didn't — the audit's "handler exists but unmounted" was wrong; it didn't exist).
+  Added `catalog::get_manufacturer` (uses `MANUFACTURER_COLS` for the enum text casts) + the route +
+  a `manufacturer_get_one_and_404` integration test.
+
+Validation: `cargo fmt`/`clippy -D warnings` clean; full suite **10 unit + 20 integration green**.
+Note: one local-only flake first appeared — `phase2_verify_and_asset_tags` hardcodes serial
+`GPU-1234A` (not the idempotent `sn()` helper), so it collides on a re-run against the persistent
+dev DB (globally-unique serials, D-017); freed the parked serial and it passed. CI uses a fresh DB,
+so it's unaffected. **Follow-up (small):** switch phase2's hardcoded serials to `sn()`. Also note:
+running the integration suite locally writes test rows into the live dev DB — consider a dedicated
+test database. Merged to main.
 
 ---
 

@@ -1,7 +1,8 @@
 # Integrating an external app with the CEC Inventory backend
 
-> Last updated: 2026-06-27 · Audience: an external service (e.g. the cec.direct build platform,
+> Last updated: 2026-06-28 · Audience: an external service (e.g. the cec.direct build platform,
 > a storefront, a reporting tool) that needs to read availability or drive inventory.
+> Field-level request/response schemas for every endpoint live in `docs/API.md` (§ Endpoint schemas).
 
 The backend is a plain **JSON-over-HTTP** API. There is no SDK to install — any HTTP client
 works. This doc is the contract.
@@ -47,6 +48,10 @@ curl -s http://inventory.box:8080/availability \
   `admin` additionally reaches `/auth/users` and `/auth/tokens`.
 - Manage tokens (admin only): `GET /auth/tokens` (metadata, never the secret),
   `POST /auth/tokens/{id}/revoke`. Revocation is immediate.
+- **Token lifecycle:** tokens **do not expire** and cannot be scoped per-endpoint (role only) — there
+  is no automatic rotation. The plaintext is shown **once** at creation; store it in a secret store,
+  rotate it operationally, and revoke promptly if it leaks (a leaked token works from anywhere until
+  revoked). `last_used_at` is updated on each use, so you can spot stale/abandoned tokens.
 - Errors: `401` (no/invalid/expired/revoked credential), `403` (authenticated but not admin),
   `409` (uniqueness conflict, e.g. duplicate serial), `429` (login lockout). Error body is
   `{"error":"…"}`.
@@ -96,9 +101,18 @@ and `POST /purchases/from-image` (multipart photo → the vision backend).
 - **Money** is sent/received as JSON **strings** (`"1599.00"`) to preserve decimal precision.
 - **IDs** are UUIDs.
 - **Enums** are `snake_case` strings (e.g. status `in_stock`, `with_customer`).
+- **Timestamps** are ISO-8601 **UTC** strings (`2026-06-28T14:30:00Z`); bare dates are `YYYY-MM-DD`.
+- **Body size limits:** JSON requests are capped at **1 MiB**; the receipt/image upload routes
+  (`/purchases/{id}/receipt`, `/purchases/from-image[-async]`) allow **25 MiB**. A caller-supplied
+  extraction payload (`/purchases/from-payload`) is capped at **256 KiB** and **1000 line items**.
+- **Query params** are minimal: `GET /shipments?active=true` (open shipments only). Most reads are
+  unfiltered lists — use `/export` for a full mirror.
+- **Status codes:** `200/201` ok · `202` async accepted (image jobs) · `400` bad input / illegal
+  transition / FK violation · `401`/`403` auth · `404` · `409` uniqueness · `429` login lockout ·
+  `500` server · `502` extractor/carrier upstream. Body is always `{"error":"…"}`.
 - Every unit mutation writes a row to the **append-only event log** (`/units/{id}/events`) — the
   audit trail for RMA/transfer disputes. Treat it as the source of truth for "what happened".
-- The full route list is in `crates/api/src/routes/mod.rs`.
+- The full route list is in `crates/api/src/routes/mod.rs`; field-level schemas are in `docs/API.md`.
 
 ## 7. CSRF & cross-origin
 

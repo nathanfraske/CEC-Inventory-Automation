@@ -1,12 +1,25 @@
 # Changelog
 
-> Last updated: 2026-06-27
+> Last updated: 2026-06-28
 
 All notable changes to this repository are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); dates are ISO-8601. See `CLAUDE.md` §3 for the
 dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
+
+### Added / Fixed — 2026-06-28 — Complete API integration docs + GET /manufacturers/{id}
+- `docs/API.md`: new **§ Endpoint schemas** — field-level request/response shapes for all 73
+  endpoints (incl. auth/token management), generated from the handler source. Added the 3
+  previously-undocumented async endpoints (`/purchases/from-image-async`,
+  `/purchases/from-image-jobs/{id}`, `/extract/vlm-status`) to the catalog and the `202`/`500`
+  status codes + the FK-`400` vs unique-`409` distinction.
+- `docs/INTEGRATION.md`: token lifecycle (no expiry/scopes, rotate operationally, `last_used_at`),
+  body-size limits (1 MiB / 25 MiB / 256 KiB·1000 lines), ISO-8601 UTC timestamps, query params,
+  status-code table.
+- **Fixed:** mounted `GET /manufacturers/{id}` — the handler was missing while vendors and products
+  both had GET-one. Added `catalog::get_manufacturer` (+ route + `manufacturer_get_one_and_404`
+  integration test). 10 unit + 20 integration tests green.
 
 ### Security / Changed — 2026-06-27 — Cheap-wins hardening batch (5 audit items)
 - **Policy-lookup uniqueness** (migration `0006_policy_unique`): partial unique indexes on
