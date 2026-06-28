@@ -88,6 +88,27 @@ This is the mechanism that lets the repo build in CI with zero database access.
   with 600 perms, offsite if they are the only copy, and never in the repo. The `.gitignore`
   already blocks `*.dump`, `*.sql.gz`, and `backups/` as a backstop.
 
+### 5.1 Encryption, offsite replication, and the age key (DR)
+
+- **Encryption at rest:** set `BACKUP_AGE_RECIPIENT` (an age *public* key) and the script writes
+  `*.age` ciphertext. `BACKUP_AGE_IDENTITY` (the matching *private* key) is needed only to RESTORE.
+  Generate with `age-keygen -o backup-age.key`; keep the private key OFF the repo (`.gitignore`
+  blocks `*.key`/`*.agekey`).
+- **The key is the single point of failure.** Encrypted archives are worthless without the private
+  key. Losing the key = losing every backup. So the key must survive whatever kills the box.
+- **Offsite replication:** set `BACKUP_OFFSITE_DIR` to copy each run's `*.age` archives to a second
+  failure domain. On this WSL2 box that is `/mnt/c/CEC-Backups` (the Windows drive survives an ext4
+  vdisk reset). By default only ciphertext is copied.
+- **Self-sufficient offsite (this box):** `BACKUP_OFFSITE_INCLUDE_KEY=1` also mirrors the private
+  key to `BACKUP_OFFSITE_DIR`, so that location alone can restore. This **co-locates the key with
+  the ciphertext** (and on NTFS the key loses its `0600` perms — it becomes world-readable to the
+  Windows side), so only enable it on a destination trusted as much as the box. It is enabled here
+  because this machine is treated as secure; the safer alternative is a passphrase-encrypted key
+  (`age -p`) or a key stored in a password manager / encrypted USB.
+- **Prove it periodically:** `scripts/restore_drill.sh` restores the latest backup into a throwaway
+  DB. To prove the *offsite* copy specifically, decrypt an offsite `*.dump.age` with the offsite key
+  and run `pg_restore --list` (should enumerate all tables).
+
 ---
 
 ## 6. Secrets in production (pick one)
