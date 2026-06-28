@@ -8,6 +8,15 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Added — 2026-06-28 — Live carrier tracking via TrackingMore (procurement-intake phase 1)
+- `crates/tracking/src/trackingmore.rs`: first real `CarrierProvider` (D-025). TrackingMore v4
+  aggregator — GET-existing-first then register-once (`/trackings/create`), courier auto-detect via
+  `/couriers/detect` for `CarrierKind::Other`, status mapping to `ShipmentStatus`, checkpoint parsing
+  across origin+destination legs. Pure parse/normalize functions with 5 hermetic unit tests (no
+  network/credit). Wired into `provider_from_env()` (`CARRIER_PROVIDER=trackingmore`); added the
+  `reqwest` dep to the crate. The existing poller now tracks live shipments to delivery. Key auth
+  live-validated against the free `/couriers/detect` endpoint.
+
 ### Docs — 2026-06-28 — Design: automated procurement intake (email ingest + carrier tracking)
 - `docs/DESIGN-procurement-intake.md` (new) + decisions **D-024** (email-ingest worker → order-keyed
   idempotent `POST /purchases/ingest`, on-box LLM extraction, Gmail IMAP) and **D-025** (EasyPost as

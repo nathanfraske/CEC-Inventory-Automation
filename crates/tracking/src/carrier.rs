@@ -149,6 +149,15 @@ pub fn provider_from_env() -> Box<dyn CarrierProvider> {
         .as_str()
     {
         "mock" => Box::new(MockProvider::full()),
+        "trackingmore" => match crate::trackingmore::TrackingMoreProvider::from_env() {
+            Some(p) => Box::new(p),
+            None => {
+                tracing::warn!(
+                    "CARRIER_PROVIDER=trackingmore but CARRIER_API_KEY is unset; using no-op provider"
+                );
+                Box::new(NoneProvider)
+            }
+        },
         "none" | "" => Box::new(NoneProvider),
         other => {
             tracing::warn!(

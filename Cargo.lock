@@ -351,6 +351,7 @@ dependencies = [
  "async-trait",
  "cec-inventory-domain",
  "chrono",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",

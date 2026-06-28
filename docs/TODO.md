@@ -91,9 +91,11 @@ merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.m
 
 Email-in → drafted purchases + tracked shipments + reverse flow (cancel/return/exchange), on-box,
 operator-confirmed. Phased build:
-- [ ] **[2026-06-28]** Phase 1 — real `CarrierProvider` (**TrackingMore** free tier primary — polling
-  fits the poller, $0 at this volume; EasyPost the push alt) so the poller tracks live shipments
-  (D-025). Free *direct* path rejected (USPS retired free tracking).
+- ✅ DONE [2026-06-28] Phase 1 — `CarrierProvider` for **TrackingMore**
+  (`crates/tracking/src/trackingmore.rs`): GET-first then register-once, courier auto-detect for
+  `Other`, status mapping, 5 hermetic tests; `provider_from_env()` arm + `reqwest` dep. Key
+  live-validated (free `/couriers/detect` → 200); `CARRIER_PROVIDER=trackingmore` + key set in `.env`.
+  (D-025). A full live poll consumes 1 tracking credit per new shipment — run when ready.
 - [ ] **[2026-06-28]** Phase 2 — **Connections** store (D-026): `connection` table + encrypted
   write-only secrets + `/connections` API + `/ui/connections` admin page; link Gmail/Amazon/carrier
   without `.env` edits. Foundational.

@@ -6,6 +6,32 @@
 
 ---
 
+## Entry [2026-06-28] — Procurement-intake **phase 1**: live carrier tracking via TrackingMore (agent: claude, tracking-phase1)
+
+Built the first real `CarrierProvider` (D-025), so the existing shipment poller now tracks live.
+`crates/tracking/src/trackingmore.rs` + wiring:
+- TrackingMore v4 (`Tracking-Api-Key` header). `fetch()` does **GET-existing-first** (cheap), then
+  **register-once** via `/trackings/create` only if unseen (consumes one tracking credit per new
+  shipment), detecting the courier via the free `/couriers/detect` when `CarrierKind::Other`.
+- Pure parse/normalize (`extract_tracking`, `parse_tracking`, `map_status`, `parse_date`,
+  `courier_code`) so the logic is unit-tested without network/credits — **5 hermetic tests pass**.
+  Checkpoints are read across `origin_info`/`destination_info` legs; statuses map to `ShipmentStatus`;
+  the poll engine dedups by `(status, occurred_at)` and stops on delivery (unchanged).
+- `provider_from_env()` gained a `trackingmore` arm (falls back to no-op + warning if
+  `CARRIER_API_KEY` unset); added `reqwest` to the crate.
+- **Live-validated:** `/couriers/detect` returned `200` with the owner's test key (auth + reachability
+  confirmed) **without spending a tracking credit**. `CARRIER_PROVIDER=trackingmore` + the key are in
+  the gitignored `.env` only (never committed).
+
+Validation: `cargo fmt`/`clippy -D warnings` clean; tracking unit tests green. Not yet exercised
+end-to-end against a real shipment in the DB (that would create a tracking → 1 credit; the running
+api/poller containers still run the old image + `CARRIER_PROVIDER=none`). **Next:** to go live, rebuild
+api+poller and recreate with `CARRIER_PROVIDER=trackingmore`, then enter a real shipment and poll
+(`POST /shipments/{id}/poll`) — costs 1 credit. Then phase 2 (Connections store). Code committed;
+merge to main on the owner's OK.
+
+---
+
 ## Entry [2026-06-28] — DESIGN: automated procurement intake (email ingest + carrier tracking) — no code yet (agent: claude, procurement-design)
 
 Owner asked whether the system can auto-ingest vendor order-confirmation emails and auto-track
