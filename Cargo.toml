@@ -30,4 +30,4 @@ regex = "1"
 # tls-rustls and keeps openssl out of the supply chain / image (audit: supply-chain hardening).
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2", "charset"] }
 base64 = "0.22"
-sha2 = "0.10"
+sha2 = "0.11"
