@@ -47,6 +47,8 @@ services:
       EXTRACTOR_VLM_API_KEY: ${EXTRACTOR_VLM_API_KEY:-}
       EXTRACTOR_VLM_MAX_TOKENS: ${EXTRACTOR_VLM_MAX_TOKENS:-2048}
       EXTRACTOR_VLM_TIMEOUT: ${EXTRACTOR_VLM_TIMEOUT:-600}
+      # Refuse receipt images larger than this many bytes before any VLM egress (16 MiB default).
+      EXTRACTOR_VLM_MAX_IMAGE_BYTES: ${EXTRACTOR_VLM_MAX_IMAGE_BYTES:-16777216}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
     # Reach a vision model served on the host (e.g. the cec-llm-broker on :8080) from inside the
@@ -66,6 +68,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Immutable root FS: the extractor writes nothing to disk (it streams to the VLM + returns JSON).
+    # A writable /tmp covers any transient need; Python just skips __pycache__ writes harmlessly.
+    read_only: true
+    tmpfs:
+      - /tmp
     mem_limit: 1g
     pids_limit: 200
 
@@ -103,6 +110,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Immutable root FS: the api only writes receipts to the `objects` volume (mounted writable)
+    # and logs to stdout. /tmp is a tmpfs for any transient file.
+    read_only: true
+    tmpfs:
+      - /tmp
     mem_limit: 512m
     pids_limit: 200
 
@@ -125,6 +137,10 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Immutable root FS: the poller only talks to Postgres + the carrier API; no disk writes.
+    read_only: true
+    tmpfs:
+      - /tmp
     mem_limit: 256m
     pids_limit: 200
 

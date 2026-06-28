@@ -37,7 +37,7 @@ def test_vision_parses_and_normalizes_model_reply():
     assert r["engine"] == "vlm_claude"
     assert r["vendor"] == "Newegg"
     assert r["order_number"] == "NE-77"
-    assert r["total"] == 1449.0
+    assert r["total"] == "1449.00"  # normalized to an exact decimal string
     assert len(r["line_items"]) == 2
     gpu = r["line_items"][0]
     assert gpu["quantity"] == 1  # coerced from the string "1"
@@ -54,7 +54,7 @@ def test_vision_tolerates_prose_wrapped_json():
     reply = 'Here is the receipt data:\n{"vendor":"Mouser","line_items":[],"total":5.0}\nThanks!'
     r = vision.extract_image(b"x", _transport=lambda b, m: reply)
     assert r["vendor"] == "Mouser"
-    assert r["total"] == 5.0
+    assert r["total"] == "5.00"
     assert r["line_items"] == []
 
 
@@ -82,7 +82,7 @@ def test_vision_openai_backend_tags_engine():
     try:
         r = vision.extract_image(b"x", _transport=lambda b, m: '{"line_items": [], "total": 1.0}')
         assert r["engine"] == "vlm_openai"
-        assert r["total"] == 1.0
+        assert r["total"] == "1.00"
     finally:
         if prev is None:
             os.environ.pop("EXTRACTOR_VLM_BACKEND", None)
@@ -203,6 +203,27 @@ def test_vlm_status_openai_reads_broker_running_flag():
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
 
     assert s["backend"] == "openai" and s["model"] == "cec-vision-judge" and s["warm"] is True
+
+
+def test_vision_rejects_oversized_image():
+    # The egress guard refuses an image over EXTRACTOR_VLM_MAX_IMAGE_BYTES before any transport call.
+    import os
+
+    prev = os.environ.get("EXTRACTOR_VLM_MAX_IMAGE_BYTES")
+    os.environ["EXTRACTOR_VLM_MAX_IMAGE_BYTES"] = "10"
+    try:
+        raised = False
+        try:
+            # injected transport → past the stub short-circuit; the size cap (10 < 50) fires first.
+            vision.extract_image(b"x" * 50, _transport=lambda b, m: "{}")
+        except vision.ImageTooLargeError:
+            raised = True
+        assert raised, "oversized image should raise ImageTooLargeError before egress"
+    finally:
+        if prev is None:
+            os.environ.pop("EXTRACTOR_VLM_MAX_IMAGE_BYTES", None)
+        else:
+            os.environ["EXTRACTOR_VLM_MAX_IMAGE_BYTES"] = prev
 
 
 if __name__ == "__main__":

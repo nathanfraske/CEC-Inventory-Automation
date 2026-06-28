@@ -6,6 +6,98 @@
 
 ---
 
+## Entry [2026-06-27] — Cheap-wins security/hardening batch (5 audit items), validated + merged to main (agent: claude, cheap-wins)
+
+Shipped the verified "cheap-wins" batch from the reconciliation (one PR's worth, 5 audit items):
+
+1. **Policy-lookup uniqueness** — new migration `0006_policy_unique`: partial unique indexes on
+   `vendor_return_policy (vendor_id, category)` + `cec_warranty_policy (warranty_class, category)`,
+   plus single-default (NULL-category) indexes per key (a plain UNIQUE treats NULLs as distinct and
+   would let two defaults through). Touched `lib.rs` so `sqlx::migrate!` re-embeds. Applied to the
+   live DB on boot; duplicate-default insert now **rejected** (verified via psql).
+2. **Lossless receipt money (D-023)** — `extractor.py` emits money as exact 2-decimal **strings**
+   (`_money_str`, both template + VLM paths); `extractor.rs::money()` parses a string straight to
+   `Decimal` (numeric(12,2)) with a **numeric fallback** so `from-payload` callers sending numbers
+   still work. Closes the f64-drift gap on receipt totals (the shop's #1 accuracy priority).
+3. **Argon2 params pinned** — `auth.rs` `argon2()` helper (Argon2id, 64 MiB / 3 / 4) replaces
+   `Argon2::default()`. Existing hashes still verify (PHC params are read from each stored hash).
+4. **Read-only container FS** — `read_only: true` + `tmpfs:[/tmp]` on api/poller/extractor (db
+   stays writable; api still writes receipts to the `objects` volume mount). All three boot healthy.
+5. **Vision egress guard** — `vision.py` caps image size before egress
+   (`EXTRACTOR_VLM_MAX_IMAGE_BYTES`, 16 MiB default → 413 over-cap, new `ImageTooLargeError` → 413 in
+   `app.py`) and logs each real outbound vision call (backend/model/dest/bytes).
+
+**Validation (all green):** `cargo fmt`/`clippy -D warnings` clean; full Rust suite **10 unit + 19
+integration** pass (migrations incl. 0006 ran against the live DB; auth test passed under the new
+argon2 params). Python **extractor + vision** tests pass incl. a new oversized-image test. Rebuilt
++ recreated api/extractor/poller — all healthy with `ReadonlyRootfs=true`. **End-to-end:** posted a
+real receipt (the owner's tweezers screenshot) through the broker vision path → SIM Supply, Inc.,
+one Excelta line, money returned as exact strings (`unit_price "59.40"`, `tax "4.90"`, `total
+"64.30"`), `engine vlm_openai`.
+
+**Merged to `main`.** This batch + the backups-schedule entry below + the prior compute-box stack
+were merged to `main` and pushed (the 4 stacked PRs land together). Docs updated:
+AUDIT-2026-06-27 (5 items flipped to ✅ FIXED + backup-automation offsite noted), DECISIONS (D-023),
+CHANGELOG, CLAUDE.md (migration list → 0006), this entry, TODO.
+
+Files: `migrations/0006_policy_unique.sql` (new), `crates/api/src/{lib,extractor,auth}.rs`,
+`services/extractor/{extractor,vision,app}.py` + their tests, `docker-compose.yml`,
+`.env`/`.env.example`.
+
+Remaining higher-effort security items (next): `/export` admin-gating + session-derived actor;
+server-side session revocation + per-IP login limiting; base-image/Actions digest pinning + flip
+the supply-chain job to blocking; cross-table asset-tag uniqueness.
+
+---
+
+## Entry [2026-06-27] — Backups now SCHEDULED + replicated offsite; "what's next" reconciled docs↔code (agent: claude, backups-schedule)
+
+Closed the scheduling + offsite halves of Stage 5 (the prior entry left them deferred).
+
+**Scheduled backups — live.** Installed `cec-backup.{service,timer}` to `/etc/systemd/system/` and
+`systemctl enable --now`ed the timer. Next run **Sun 2026-06-28 02:34 CDT**; nightly 02:30 +
+`RandomizedDelaySec=300`, `Persistent=true` (catches a missed run at next boot). The shipped
+template targets `/opt/cec-inventory` + `User=cec`, so I installed a **box-specific** unit instead
+(real nested checkout, `User=nathan`/`Group=docker` mirroring `cec-llm-broker.service`, and
+`Environment=PATH=/home/nathan/.local/bin:…` so systemd can find `age`). The committed template
+under `scripts/systemd/` stays generic/portable. Validated by running the unit (not just the
+script): `Result=success`, exit 0, journal shows both encrypted archives written + offsite copy.
+
+**Offsite replication — live.** Added a generic, env-gated step to `scripts/db_backup.sh`: when
+`BACKUP_OFFSITE_DIR` is set it copies the run's encrypted `*.age` archives there (same retention).
+Set `BACKUP_OFFSITE_DIR=/mnt/c/CEC-Backups` in `.env` (the Windows drive = a different failure
+domain than the WSL2 ext4 vdisk). Documented all `BACKUP_*` in `.env.example` (was undocumented).
+**Proven recoverable end-to-end:** decrypted the OFFSITE dump with the age key and
+`pg_restore --list` enumerated all 21 tables.
+
+**Key DR — closed (owner's call).** The owner deemed the machine secure, so the age private key is
+replicated offsite too: copied to `/mnt/c/CEC-Backups/backup-age.key`, made durable via
+`BACKUP_OFFSITE_INCLUDE_KEY=1` (the script re-mirrors it each run, so a key rotation stays in sync).
+**Proven:** decrypting the offsite archive with the *offsite* key copy restored all 21 tables — so
+`/mnt/c` alone fully recovers after a vdisk loss. Tradeoff recorded: this co-locates key+ciphertext
+and the key is world-readable on NTFS (acceptable under the "machine is secure" decision; safer
+options are `age -p` or a password-manager copy). See SECRETS-AND-DATABASE.md §5.1.
+
+Reverse the schedule with: `sudo systemctl disable --now cec-backup.timer && sudo rm
+/etc/systemd/system/cec-backup.{service,timer}`.
+
+**"What's next" reconciliation.** Ran a fan-out workflow (6 read-only verifiers + synthesis) that
+checked every open TODO against the actual code/git state. Headline: backups DR was the #1 risk
+(done now). Verified-**stale** TODO items to tombstone next pass — (1) "Run the integration test in
+CI" is DONE (`ci.yml` has a `tests` job: postgres:16 service + migrations + `cargo test`);
+(2) the Phase-0-section "Close gate F locally" duplicate is DONE (gitleaks 8.30.1 clean, V-002
+ended); (3) audit "CSRF tokens (multipart)" is already covered by the same-origin guard
+(`auth.rs` `same_origin`/`csrf_ok`). Top remaining threads (next sessions): merge PRs #12→#15 to
+main; build the `/ui/purchases/{id}` line-item resolve/expand + receipt-upload UI (the receipt→
+inventory missing link); a cheap-wins security PR (policy-lookup UNIQUE constraints, money
+f64→string in the extractor, argon2 param pinning, read-only container FS, vision egress cap);
+then `/export` admin-gating + session-derived actor, digest pinning, and a real carrier provider.
+
+Changed this entry: `scripts/db_backup.sh` (+offsite step), `.env`/`.env.example`, this doc +
+TODO + CHANGELOG + CLAUDE.md §5/§8. No Rust/Python changed.
+
+---
+
 ## Entry [2026-06-27] — Stage 5: encrypted, container-aware backups validated; scheduling + keep-warm deferred (agent: claude, backups)
 
 Stood up and **proved** backups on the box (CLAUDE.md §8 step 5):

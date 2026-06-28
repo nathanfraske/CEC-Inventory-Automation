@@ -8,6 +8,36 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Security / Changed — 2026-06-27 — Cheap-wins hardening batch (5 audit items)
+- **Policy-lookup uniqueness** (migration `0006_policy_unique`): partial unique indexes on
+  `vendor_return_policy (vendor_id, category)` and `cec_warranty_policy (warranty_class, category)`
+  + single-default (NULL-category) indexes per key, so a warranty/return lookup can't silently
+  match multiple rows. Duplicate-default insert now rejected (verified).
+- **Lossless receipt money** (D-023): the extractor emits money as exact 2-decimal **strings**
+  (`_money_str`, template + VLM paths) and `extractor.rs::money()` parses strings to `Decimal`
+  (numeric(12,2)) with a numeric fallback for back-compat. No more f64 drift on receipt totals.
+  Validated end-to-end through the broker.
+- **Argon2 params pinned**: `auth.rs` uses an explicit `Params` (Argon2id, 64 MiB / 3 / 4) instead
+  of `Argon2::default()`. Existing hashes still verify (params are read from each stored hash).
+- **Read-only container FS**: `read_only: true` + `tmpfs:[/tmp]` on api/poller/extractor (db stays
+  writable; the api still writes receipts to the `objects` volume). All three boot healthy.
+- **Vision egress guard**: `vision.py` caps image size before egress (`EXTRACTOR_VLM_MAX_IMAGE_BYTES`,
+  16 MiB default → 413 over-cap) and logs each real outbound vision call (backend/model/dest/size).
+
+### Added — 2026-06-27 — Scheduled nightly backups + offsite replication (Stage 5 completion)
+- Installed and enabled the `cec-backup` systemd timer on the box (nightly 02:30 + up to 5 min
+  jitter, `Persistent=true`). Backups now run automatically instead of only on manual `just backup`.
+  The installed unit is box-specific (`User=nathan`/`Group=docker`, the real nested checkout, and
+  `~/.local/bin` on `PATH` so systemd finds `age`); the committed template under
+  `scripts/systemd/` stays generic. Validated through the unit: `Result=success`, both archives
+  written, offsite copy made.
+- `scripts/db_backup.sh` gained an optional offsite step gated on `BACKUP_OFFSITE_DIR`: each run's
+  encrypted `*.age` archives are replicated to a second failure domain (here `/mnt/c/CEC-Backups`,
+  the Windows drive — survives an ext4 vdisk reset), with the same retention. The age PRIVATE KEY
+  is intentionally NOT replicated there. Proven recoverable: the offsite dump decrypts with the key
+  and `pg_restore --list` shows all 21 tables.
+- Documented `BACKUP_*` (incl. `BACKUP_OFFSITE_DIR`) in `.env.example` (previously undocumented).
+
 ### Changed — 2026-06-27 — Backups work without host pg tools (container-aware)
 - `scripts/db_backup.sh` / `db_restore.sh` / `restore_drill.sh` route `pg_dump`/`pg_restore`/
   `psql` through the `db` compose service when the host lacks them, and archive/restore receipts

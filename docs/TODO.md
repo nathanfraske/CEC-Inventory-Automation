@@ -22,12 +22,18 @@ merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.m
   JSON (vendor/lines/serials/totals), `engine=vlm_openai`, images stay on-box (§11.2). D-020/D-021.
   REMAINING: OpenCV long-receipt `/stitch` (still a placeholder); decide whether to enable the
   keep-warm timer (holds ~21 GB VRAM).
-- ◐ PARTIAL [2026-06-27] **Backups.** DONE: validated on the box — age-encrypted DB + object-store
+- ✅ DONE [2026-06-27] **Backups (Stage 5 complete).** DONE: validated on the box — age-encrypted DB + object-store
   archives via `db_backup.sh`; **restore drill PASSED** (21 tables) via `restore_drill.sh`; scripts
-  are container-aware (no host pg tools / no sudo needed; `scripts/_pglib.sh`, D-022). Age key at
-  `~/.config/cec/backup-age.key` — **NOT in git; back it up offsite or restores are impossible.**
-  OUTSTANDING: enable the schedule (`scripts/systemd/cec-backup.{service,timer}` — needs sudo) +
-  an offsite replication target.
+  are container-aware (no host pg tools / no sudo needed; `scripts/_pglib.sh`, D-022).
+  ✅ SCHEDULE + OFFSITE DONE [2026-06-27]: `cec-backup.timer` installed + enabled (nightly 02:30 +
+  jitter, `Persistent=true`; box-specific unit — `User=nathan`, real checkout, `age` on PATH);
+  `scripts/db_backup.sh` now replicates each run's encrypted `*.age` to
+  `BACKUP_OFFSITE_DIR=/mnt/c/CEC-Backups` (Windows drive = separate failure domain). Validated via
+  the systemd unit (`Result=success`); the **offsite** copy proven restorable (decrypts → 21 tables).
+  ✅ KEY DR DONE [2026-06-27]: owner deemed the box secure → the age private key is also replicated
+  to `/mnt/c/CEC-Backups/backup-age.key`, kept in sync by `BACKUP_OFFSITE_INCLUDE_KEY=1`; `/mnt/c`
+  alone proven to fully restore (decrypt with the offsite key → 21 tables). See
+  SECRETS-AND-DATABASE.md §5.1 + HANDOFF [2026-06-27] (backups-schedule).
 - [ ] **[2026-06-27] Enable the receipt-vision keep-warm timer** (implement later): install
   `scripts/systemd/cec-vlm-keepwarm.{service,timer}` (needs sudo) so `cec-vision-judge` stays
   resident and operators skip the ~2-3 min cold load. Holds ~21 GB VRAM — enable only when the GPU
@@ -40,12 +46,10 @@ merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.m
   the GitHub runner and smoke-tests `/readyz` + extractor `/health` on every push. The local
   web sandbox still has no docker daemon (deviation V-001), but the container path is now
   verified on CI rather than blocked. `docker compose config` validates locally.
-- [ ] **[2026-06-27] Close gate F (secret scan) locally.** Install gitleaks and run
-  `gitleaks detect --source . --redact` (or `just scan`); confirm zero leaks. CI already runs
-  it on push, but a clean local run fully closes the runbook gate.
-  ◐ PARTIAL [2026-06-27] — commit succeeded and `.env` is unstaged/ignored (two of the three
-  gate conditions met); only the local gitleaks run is outstanding. Local install was denied in
-  this environment; the CI `secret-scan` job is the active backstop until then.
+- ✅ DONE [2026-06-27] **Close gate F (secret scan) locally.** Superseded by the "Now on a compute
+  box" gate-F item above — gitleaks 8.30.1 installed, `gitleaks detect --source .` clean across 47
+  commits, V-002 ended. This Phase-0-section copy held stale web-sandbox state ("local install
+  denied"); tombstoned 2026-06-27 after the docs↔code reconciliation confirmed it done.
 - [ ] **[2026-06-27] Verify CI is green on first push.** Confirm the `secret-scan` and `rust`
   jobs pass (`fmt --check`, `clippy -D warnings`, `build` with `SQLX_OFFLINE=true`).
   ✅ DONE [2026-06-27] — green on head `81960f6` after the gitleaks `GITHUB_TOKEN` fix.
@@ -55,9 +59,11 @@ merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.m
 - [ ] **[2026-06-27] Migrate to compile-time-checked SQLx queries + commit `.sqlx/`.** Convert
   the runtime `query`/`query_as` calls to `query!`/`query_as!`, run `just prepare`, commit the
   cache (scope INV-OQ-1; see `docs/DECISIONS.md` D-010).
-- [ ] **[2026-06-27] Run the integration test in CI.** Add a Postgres service to the `rust`
-  job, run migrations, and `cargo test` so `crates/api/tests/api.rs` executes in CI (today it
-  self-skips without `DATABASE_URL`).
+- ✅ DONE [2026-06-27] **Run the integration test in CI.** Verified done in the docs↔code
+  reconciliation: `.github/workflows/ci.yml` has a dedicated `tests` job (postgres:16 service +
+  migrations + `cargo test --workspace`), so `crates/api/tests/api.rs` executes on every push — it
+  no longer self-skips. (The header comment in `crates/api/tests/api.rs` still claims CI is DB-free;
+  fix that stale comment next time the file is touched.)
 
 ## Open — Phase 1 (receipt capture, extraction, cost, order tracking) — scope §20
 
@@ -88,12 +94,14 @@ merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.m
   login; **serial-number uniqueness (globally unique, D-017)** + asset-tag uniqueness +
   append-only triggers (migration 0003); system-gating TOCTOU locks; status-transition matrix;
   `/export` completeness; session TTL + login throttle + RBAC (migration 0004); non-root
-  containers + cap_drop/limits; `cargo audit`/`pip-audit`/dependabot. OUTSTANDING: server-side
-  session revocation; per-IP/persistent login limiting; finer RBAC + `/export` admin-gating +
-  session-derived actor; CSRF tokens (multipart); read-only container FS + db cap hardening;
-  image/Actions digest pinning + flip audit to blocking; backup automation/encryption/offsite +
-  restore drill + WAL/PITR; money f64→string in the extractor path; cross-table asset-tag
-  uniqueness; policy-lookup unique constraints; argon2 param pinning; vision egress audit/size cap.
+  containers + cap_drop/limits; `cargo audit`/`pip-audit`/dependabot. ALSO DONE [2026-06-27]
+  (cheap-wins batch): policy-lookup uniqueness (migration 0006); money f64→string in the extractor
+  path (D-023); argon2 param pinning; read-only container FS (+tmpfs); vision egress audit + size
+  cap. AND [2026-06-27] backups scheduled + encrypted + offsite + restore drill (Stage 5). CSRF
+  multipart is already covered by the same-origin guard (`auth.rs`), not a separate token. OUTSTANDING:
+  server-side session revocation; per-IP/persistent login limiting; finer RBAC + `/export`
+  admin-gating + session-derived actor; image/Actions digest pinning + flip audit to blocking;
+  WAL/PITR + a true off-machine backup target; cross-table asset-tag uniqueness.
 
 ## Open — hardening follow-ups (backend for Phases 1–5 is done; see HANDOFF [2026-06-27])
 

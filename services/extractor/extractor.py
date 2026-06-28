@@ -11,6 +11,7 @@ JSON. Adding a real vendor template = adding an entry to TEMPLATES.
 from __future__ import annotations
 
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 # ---- output schema helpers ----------------------------------------------------
@@ -34,8 +35,28 @@ def _empty_result(vendor: Optional[str], engine: str) -> dict:
     }
 
 
-def _money(s: str) -> float:
-    return round(float(s.replace(",", "").replace("$", "")), 2)
+def _money_str(v) -> Optional[str]:
+    """Coerce a money value (str / int / float / None) to an EXACT 2-decimal string, or None.
+
+    Strings — not floats — so the Rust seam parses them straight into the numeric(12,2) columns
+    with no IEEE-754 drift (e.g. a float 1099.10 can serialize as 1099.0999999; scope §11.4).
+    Tolerates a stray currency symbol or thousands separator. Shared by the template and VLM paths
+    so every money field leaves the extractor as a canonical string.
+    """
+    if v is None:
+        return None
+    s = str(v).strip().replace(",", "").replace("$", "")
+    if not s:
+        return None
+    try:
+        return f"{Decimal(s):.2f}"
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _money(s: str) -> Optional[str]:
+    """Template-path money: a regex-captured token (well-formed) → exact 2-decimal string."""
+    return _money_str(s)
 
 
 # ---- template fast-path -------------------------------------------------------

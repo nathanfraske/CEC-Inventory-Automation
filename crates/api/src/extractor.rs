@@ -4,6 +4,7 @@
 //! inference box, so this is a best-effort call: a 502 is returned when it is unreachable.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::{Multipart, Path, State};
@@ -109,10 +110,17 @@ pub async fn extract_preview(
 }
 
 fn money(v: &Value, key: &str) -> Option<Decimal> {
-    v.get(key)
-        .and_then(|x| x.as_f64())
-        .and_then(Decimal::from_f64_retain)
-        .map(|d| d.round_dp(2))
+    let raw = v.get(key)?;
+    // Prefer a JSON **string** — the extractor now emits exact 2-decimal strings (e.g. "1599.00"),
+    // so the value lands losslessly in the numeric(12,2) column. Fall back to a JSON number (lossy
+    // f64 → Decimal) for back-compat with `from-payload` callers that still send bare numbers.
+    let d = if let Some(s) = raw.as_str() {
+        let cleaned = s.trim().trim_start_matches('$').replace(',', "");
+        Decimal::from_str(cleaned.trim()).ok()?
+    } else {
+        Decimal::from_f64_retain(raw.as_f64()?)?
+    };
+    Some(d.round_dp(2))
 }
 
 fn parse_dt(v: &Value) -> Option<DateTime<Utc>> {

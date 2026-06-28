@@ -24,8 +24,8 @@ def test_known_vendor_template_path():
     gpu = r["line_items"][0]
     assert gpu["quantity"] == 1
     assert gpu["serials"] == ["GPU-2291X"]
-    assert gpu["unit_price"] == 1599.00
-    assert r["total"] == 1752.55
+    assert gpu["unit_price"] == "1599.00"  # money is an exact decimal string, not a float
+    assert r["total"] == "1752.55"
 
 
 def test_partial_serials_flagged():

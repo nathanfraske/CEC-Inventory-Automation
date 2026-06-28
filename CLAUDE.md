@@ -130,7 +130,8 @@ just fmt / just lint / just scan
 - **Migrations are append-only:** never edit an applied migration; add a new numbered file.
   Current set: `0001_init` (18 tables) · `0002_app_user` · `0003_integrity_hardening`
   (serial/asset-tag uniqueness + append-only triggers) · `0004_app_user_role` (RBAC) ·
-  `0005_api_token`. NOTE: `sqlx::migrate!` embeds at COMPILE time and won't reliably re-embed a
+  `0005_api_token` · `0006_policy_unique` (vendor-return/CEC-warranty policy per-category
+  uniqueness). NOTE: `sqlx::migrate!` embeds at COMPILE time and won't reliably re-embed a
   new migration on stable Rust unless `crates/api/src/lib.rs` (the macro site) recompiles —
   touch it or `cargo clean -p cec-inventory-api` (a comment by the macro documents this).
 - **Event logging:** write a `unit_event` row on every unit mutation as each feature lands
@@ -141,12 +142,15 @@ just fmt / just lint / just scan
   mint). Cookie writes are CSRF-guarded (same-origin). First run: `POST /auth/bootstrap` makes
   the first admin. See `docs/INTEGRATION.md`.
 - **Backups:** `just backup` (or `scripts/db_backup.sh`) dumps the DB **and** the receipt object
-  store (the legal RMA proof artifacts) as a paired set; supports age encryption + retention.
-  `scripts/restore_drill.sh` proves the latest backup restores. Schedule with
-  `scripts/systemd/cec-backup.{service,timer}`. On a Docker-only box (no host `psql`/`pg_dump`)
-  the scripts auto-route through the `db` container and the receipts named volume
-  (`scripts/_pglib.sh`, D-022). Set `BACKUP_DIR`/`BACKUP_AGE_RECIPIENT`/`BACKUP_AGE_IDENTITY` in
-  `.env`; keep the age key off-repo and backed up.
+  store (the legal RMA proof artifacts) as a paired set; supports age encryption + retention +
+  offsite replication. `scripts/restore_drill.sh` proves the latest backup restores. On a
+  Docker-only box (no host `psql`/`pg_dump`) the scripts auto-route through the `db` container and
+  the receipts named volume (`scripts/_pglib.sh`, D-022). Set `BACKUP_DIR` / `BACKUP_AGE_RECIPIENT`
+  / `BACKUP_AGE_IDENTITY` in `.env`; `BACKUP_OFFSITE_DIR` mirrors each run's `*.age` to a second
+  failure domain and `BACKUP_OFFSITE_INCLUDE_KEY=1` also mirrors the private key there (enable only
+  on a trusted destination). **On this box the schedule is live:** `cec-backup.timer` installed +
+  enabled (nightly 02:30), offsite → `/mnt/c/CEC-Backups` incl. the key — see HANDOFF [2026-06-27]
+  (backups-schedule) + SECRETS-AND-DATABASE.md §5.1.
 
 ## 6. Layout
 
@@ -164,7 +168,7 @@ crates/poller    shipment-tracking worker: polls active shipments via crates/tra
 crates/domain    shared domain types mapping to the Postgres enums
 migrations        SQLx migrations (append-only): 0001 init (18 tables) · 0002 app_user ·
                  0003 integrity (serial/asset-tag uniqueness + append-only triggers) ·
-                 0004 app_user role (RBAC) · 0005 api_token
+                 0004 app_user role (RBAC) · 0005 api_token · 0006 policy_unique
 services/extractor  Python FastAPI extractor: deterministic template path + vision.py
                  (stub | `claude` hosted-vision image backend). Local VLM/OpenCV on the GPU box.
 docs              scope spec + memory docs (HANDOFF, TODO, DECISIONS) + API.md + INTEGRATION.md
@@ -202,5 +206,6 @@ apply** — first steps:
    app (`POST /auth/tokens`); see `docs/INTEGRATION.md` and `docs/API.md`.
 4. **GPU/inference box:** enables the real vision path — set `EXTRACTOR_VLM_BACKEND=claude`
    (hosted interim) or wire the local model + OpenCV stitching in `services/extractor/`.
-5. Stand up scheduled backups: install `scripts/systemd/cec-backup.{service,timer}` and set
-   `BACKUP_AGE_RECIPIENT` (encryption) + an offsite target.
+5. ✅ DONE [2026-06-27] Scheduled backups stood up: `cec-backup.timer` installed + enabled (nightly
+   02:30), age-encrypted, with offsite replication (incl. the key) to `/mnt/c/CEC-Backups`. Stage 5
+   complete — see HANDOFF [2026-06-27] (backups-schedule).

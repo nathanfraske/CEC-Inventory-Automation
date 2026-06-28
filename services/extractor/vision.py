@@ -26,11 +26,14 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import urllib.request
 from typing import Callable, Optional
 
-from extractor import _empty_result
+from extractor import _empty_result, _money_str
+
+_log = logging.getLogger("cec.extractor.vision")
 
 ANTHROPIC_VERSION = "2023-06-01"
 
@@ -49,20 +52,20 @@ object (no prose, no markdown fences) with exactly these keys:
     "description": string,
     "vendor_sku": string|null,
     "quantity": integer,
-    "unit_price": number|null,
-    "line_total": number|null,
+    "unit_price": decimal string|null,
+    "line_total": decimal string|null,
     "serials": [string],
     "is_bundle": boolean
   } ],
-  "subtotal": number|null,
-  "tax": number|null,
-  "shipping": number|null,
-  "discount_total": number|null,
-  "total": number|null
+  "subtotal": decimal string|null,
+  "tax": decimal string|null,
+  "shipping": decimal string|null,
+  "discount_total": decimal string|null,
+  "total": decimal string|null
 }
-Rules: money as plain numbers (no currency symbols or thousands separators); quantities as \
-integers; copy any per-line serial numbers you can read into that line's "serials" array; \
-use null for anything absent. Return JSON only."""
+Rules: money as decimal STRINGS with exactly two places (e.g. "19.99"), no currency symbols or \
+thousands separators; quantities as integers; copy any per-line serial numbers you can read into \
+that line's "serials" array; use null for anything absent. Return JSON only."""
 
 
 def _anthropic_transport(image_b64: str, media_type: str) -> str:
@@ -200,6 +203,7 @@ def _parse_json(text: str) -> dict:
 def _normalize(raw: dict, vendor_hint: Optional[str], engine: str = "vlm_claude") -> dict:
     """Coerce the model's object into the canonical §11.4 schema (fill gaps, fix types)."""
     out = _empty_result(raw.get("vendor") or vendor_hint, engine)
+    money_keys = {"subtotal", "tax", "shipping", "discount_total", "total"}
     for k in (
         "purchase_datetime",
         "order_number",
@@ -211,7 +215,7 @@ def _normalize(raw: dict, vendor_hint: Optional[str], engine: str = "vlm_claude"
         "total",
     ):
         if raw.get(k) is not None:
-            out[k] = raw[k]
+            out[k] = _money_str(raw[k]) if k in money_keys else raw[k]
     if raw.get("currency"):
         out["currency"] = raw["currency"]
 
@@ -226,8 +230,8 @@ def _normalize(raw: dict, vendor_hint: Optional[str], engine: str = "vlm_claude"
                 "description": (li.get("description") or "").strip(),
                 "vendor_sku": li.get("vendor_sku"),
                 "quantity": qty,
-                "unit_price": li.get("unit_price"),
-                "line_total": li.get("line_total"),
+                "unit_price": _money_str(li.get("unit_price")),
+                "line_total": _money_str(li.get("line_total")),
                 "serials": [s for s in (li.get("serials") or []) if s],
                 "is_bundle": bool(li.get("is_bundle")),
                 "partial_serials": False,
@@ -250,6 +254,20 @@ _BACKENDS: dict[str, tuple[Callable[[str, str], str], str]] = {
 }
 
 
+class ImageTooLargeError(ValueError):
+    """A receipt image exceeded EXTRACTOR_VLM_MAX_IMAGE_BYTES — refused before any VLM egress."""
+
+
+def _egress_dest(backend: str) -> str:
+    """Human-readable destination a receipt image would be sent to (for the egress audit log)."""
+    if backend == "openai":
+        return (os.environ.get("EXTRACTOR_VLM_BASE_URL") or "unset").rstrip("/") + "/chat/completions"
+    if backend == "claude":
+        base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
+        return base + "/v1/messages"
+    return backend
+
+
 def extract_image(
     image_bytes: bytes,
     media_type: str = "image/jpeg",
@@ -270,6 +288,30 @@ def extract_image(
     # default); an injected transport keeps the backend's engine tag for test fidelity.
     default_transport, engine = _BACKENDS.get(backend, (_anthropic_transport, "vlm_claude"))
     transport = _transport or default_transport
+
+    # Egress guard (scope §11.2 audit): cap the raw image size BEFORE it is base64-expanded and
+    # shipped to the VLM endpoint, so a poisoned/oversized upload can't blow up the request or the
+    # off-box payload. Generous default (16 MiB) clears legitimate phone photos.
+    max_bytes = int(os.environ.get("EXTRACTOR_VLM_MAX_IMAGE_BYTES", str(16 * 1024 * 1024)))
+    if len(image_bytes) > max_bytes:
+        raise ImageTooLargeError(
+            f"receipt image is {len(image_bytes)} bytes, over the "
+            f"EXTRACTOR_VLM_MAX_IMAGE_BYTES={max_bytes} cap"
+        )
+
+    # Audit the egress (size + destination). Only for a real transport — an injected test transport
+    # makes no network call. Matters most for the off-box 'claude' path (with 'openai' aimed at the
+    # local broker the image stays on the box, §11.2).
+    if _transport is None:
+        _log.info(
+            "vision egress: backend=%s model=%s dest=%s image_bytes=%d media=%s",
+            backend,
+            os.environ.get("EXTRACTOR_VLM_MODEL"),
+            _egress_dest(backend),
+            len(image_bytes),
+            media_type,
+        )
+
     image_b64 = base64.b64encode(image_bytes).decode("ascii")
     raw = _parse_json(transport(image_b64, media_type))
     return _normalize(raw, vendor_hint, engine)

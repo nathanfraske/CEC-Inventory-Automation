@@ -17,7 +17,7 @@ import base64
 import os
 from typing import List, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 import extractor
@@ -67,8 +67,14 @@ def vlm_status() -> dict:
 
 @app.post("/extract-image")
 def extract_image(req: ExtractImageRequest) -> dict:
-    data = base64.b64decode(req.image_base64)
-    return vision.extract_image(data, req.media_type, req.vendor_hint)
+    try:
+        data = base64.b64decode(req.image_base64, validate=True)
+    except ValueError:  # binascii.Error subclasses ValueError
+        raise HTTPException(status_code=400, detail="image_base64 is not valid base64")
+    try:
+        return vision.extract_image(data, req.media_type, req.vendor_hint)
+    except vision.ImageTooLargeError as e:
+        raise HTTPException(status_code=413, detail=str(e))
 
 
 @app.post("/stitch")

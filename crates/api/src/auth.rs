@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
-use argon2::Argon2;
+use argon2::{Algorithm, Argon2, Params, Version};
 use axum::extract::{Path, Request, State};
 use axum::http::{header, HeaderMap};
 use axum::middleware::Next;
@@ -68,9 +68,18 @@ pub struct Credentials {
     pub password: String,
 }
 
+/// Argon2id with **explicitly pinned** parameters, so the work factor never silently shifts with a
+/// library-default change. 64 MiB memory, 3 iterations, 4 lanes (OWASP-strong for an operator-login
+/// workload). Verification reads the parameters embedded in each stored PHC hash string, so pinning
+/// new params here does not invalidate hashes minted under the old default.
+fn argon2() -> Argon2<'static> {
+    let params = Params::new(64 * 1024, 3, 4, None).expect("hardcoded argon2 params are valid");
+    Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+}
+
 fn hash_password(pw: &str) -> ApiResult<String> {
     let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
+    argon2()
         .hash_password(pw.as_bytes(), &salt)
         .map(|h| h.to_string())
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("hash error: {e}")))
@@ -78,11 +87,7 @@ fn hash_password(pw: &str) -> ApiResult<String> {
 
 fn verify_password(pw: &str, hash: &str) -> bool {
     PasswordHash::new(hash)
-        .map(|ph| {
-            Argon2::default()
-                .verify_password(pw.as_bytes(), &ph)
-                .is_ok()
-        })
+        .map(|ph| argon2().verify_password(pw.as_bytes(), &ph).is_ok())
         .unwrap_or(false)
 }
 
