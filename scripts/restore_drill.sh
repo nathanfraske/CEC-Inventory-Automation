@@ -10,6 +10,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck disable=SC1091
 . ./.env
+# shellcheck disable=SC1091
+. ./scripts/_pglib.sh   # cec_pg_* (host pg tools, or the db container if absent)
 
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/cec-inventory}"
 LATEST="$(ls -1t "$BACKUP_DIR"/cec_inventory_*.dump "$BACKUP_DIR"/cec_inventory_*.dump.age 2>/dev/null | head -1 || true)"
@@ -19,7 +21,7 @@ WORK="$(mktemp -d)"
 DRILL_DB="cec_restore_drill_$$"
 ADMIN_URL="${DATABASE_URL%/*}/postgres"   # same server, default 'postgres' db
 cleanup() {
-  psql "$ADMIN_URL" -c "DROP DATABASE IF EXISTS \"$DRILL_DB\" WITH (FORCE)" >/dev/null 2>&1 || true
+  cec_psql_c "$ADMIN_URL" "DROP DATABASE IF EXISTS \"$DRILL_DB\" WITH (FORCE)" >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -35,12 +37,12 @@ case "$LATEST" in
 esac
 
 # Restore into a throwaway DB on the same server.
-psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$DRILL_DB\""
+cec_psql_c "$ADMIN_URL" "CREATE DATABASE \"$DRILL_DB\"" -v ON_ERROR_STOP=1
 DRILL_URL="${DATABASE_URL%/*}/$DRILL_DB"
-pg_restore --no-owner --dbname="$DRILL_URL" "$DUMP"
+cec_pg_restore_into "$DRILL_URL" "$DUMP"
 
-TABLES="$(psql "$DRILL_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")"
-UNITS="$(psql "$DRILL_URL" -tAc "SELECT count(*) FROM inventory_unit")"
+TABLES="$(cec_psql_tac "$DRILL_URL" "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")"
+UNITS="$(cec_psql_tac "$DRILL_URL" "SELECT count(*) FROM inventory_unit")"
 [ "$TABLES" -ge 18 ] || { echo "FAIL: only $TABLES public tables restored (expected >=18)"; exit 1; }
 echo "DB restore OK: $TABLES public tables, $UNITS units, from $(basename "$LATEST")"
 

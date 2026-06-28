@@ -143,7 +143,10 @@ just fmt / just lint / just scan
 - **Backups:** `just backup` (or `scripts/db_backup.sh`) dumps the DB **and** the receipt object
   store (the legal RMA proof artifacts) as a paired set; supports age encryption + retention.
   `scripts/restore_drill.sh` proves the latest backup restores. Schedule with
-  `scripts/systemd/cec-backup.{service,timer}`.
+  `scripts/systemd/cec-backup.{service,timer}`. On a Docker-only box (no host `psql`/`pg_dump`)
+  the scripts auto-route through the `db` container and the receipts named volume
+  (`scripts/_pglib.sh`, D-022). Set `BACKUP_DIR`/`BACKUP_AGE_RECIPIENT`/`BACKUP_AGE_IDENTITY` in
+  `.env`; keep the age key off-repo and backed up.
 
 ## 6. Layout
 

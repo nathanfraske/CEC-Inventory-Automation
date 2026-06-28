@@ -6,6 +6,35 @@
 
 ---
 
+## Entry [2026-06-27] — Stage 5: encrypted, container-aware backups validated; scheduling + keep-warm deferred (agent: claude, backups)
+
+Stood up and **proved** backups on the box (CLAUDE.md §8 step 5):
+- `scripts/db_backup.sh` → age-**encrypted** DB dump (`*.dump.age`) + receipt object-store archive
+  (`*.tar.gz.age`) in `BACKUP_DIR` (`~/cec-backups`), with retention pruning.
+- `scripts/restore_drill.sh` → decrypts, restores into a throwaway DB, verified **21 public
+  tables — PASSED**.
+- **Container-aware (new `scripts/_pglib.sh`):** this box has no host `psql`/`pg_dump`/`pg_restore`
+  (and no passwordless sudo to install them) and the data lives in Docker volumes, so the scripts
+  now route pg tools through the `db` service and archive/restore receipts via the
+  `cec-inventory_objects` named volume when there is no host `STORAGE_FS_ROOT`
+  (`CEC_PG_MODE=host|container`; host tools still take precedence). D-022.
+- **age** v1.3.1 installed (`~/.local/bin`); keypair at `~/.config/cec/backup-age.key`, recipient
+  in the gitignored `.env`. ⚠️ **The private key is NOT in git — back it up offsite or the
+  encrypted backups are unrecoverable.**
+
+Also cleaned the DB to a fresh slate: removed the session's test draft purchases + the test
+vendor (admin account retained); 0 purchases / 0 vendors now.
+
+Deferred (need sudo / a target), tracked in `docs/TODO.md`:
+- Enable the backup **schedule** (`scripts/systemd/cec-backup.{service,timer}`) + an **offsite**
+  replication target.
+- Enable the receipt-vision **keep-warm** timer (`scripts/systemd/cec-vlm-keepwarm.*`) — holds
+  ~21 GB VRAM, so on only when the GPU isn't needed elsewhere.
+
+No Rust/Python changed this entry; only ops scripts + docs.
+
+---
+
 ## Entry [2026-06-27] — Async receipt-vision flow + cec-vision-judge seat + keep-warm (agent: claude, async extract)
 
 Made receipt-image extraction **asynchronous** so the operator UI never blocks on a (possibly

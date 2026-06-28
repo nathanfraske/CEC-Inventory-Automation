@@ -8,6 +8,13 @@ dating + tombstoning conventions that govern the memory documents.
 
 ## [Unreleased]
 
+### Changed — 2026-06-27 — Backups work without host pg tools (container-aware)
+- `scripts/db_backup.sh` / `db_restore.sh` / `restore_drill.sh` route `pg_dump`/`pg_restore`/
+  `psql` through the `db` compose service when the host lacks them, and archive/restore receipts
+  via the `<project>_objects` named volume when there is no host `STORAGE_FS_ROOT` (new
+  `scripts/_pglib.sh`; host tools still preferred). Validated on the box: age-encrypted backup +
+  restore drill (21 tables) PASSED. Decision D-022.
+
 ### Added — 2026-06-27 — Async receipt-vision flow (warming-aware) + keep-warm
 - `POST /purchases/from-image-async` + `GET /purchases/from-image-jobs/{id}` + `GET
   /extract/vlm-status`: non-blocking receipt-image extraction via an in-memory job, so the UI

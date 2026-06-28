@@ -15,6 +15,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck disable=SC1091
 . ./.env
+# shellcheck disable=SC1091
+. ./scripts/_pglib.sh   # cec_pg_* + cec_objects_* (host pg tools, or the db container if absent)
 
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/cec-inventory}"
 mkdir -p "$BACKUP_DIR"
@@ -40,26 +42,24 @@ maybe_encrypt() {
   fi
 }
 
-# 1) Database — custom-format dump, restorable with pg_restore. Uses DATABASE_URL.
-pg_dump --format=custom --no-owner --dbname="$DATABASE_URL" --file="$DB_OUT"
+# 1) Database — custom-format dump, restorable with pg_restore. Uses host pg tools, or the db
+#    container when the host has none (CEC_PG_MODE).
+echo "pg mode: ${CEC_PG_MODE}"
+cec_pg_dump_custom "$DATABASE_URL" "$DB_OUT"
 chmod 600 "$DB_OUT"
 # Validate the dump is readable before claiming success (catches a partial/failed dump).
-pg_restore --list "$DB_OUT" >/dev/null
+cec_pg_restore_list "$DB_OUT"
 maybe_encrypt "$DB_OUT"
 
 # 2) Object store (receipts/photos), timestamp-paired with the DB dump so they restore as a set.
-OBJ_ROOT="${STORAGE_FS_ROOT:-}"
+#    Archives a host STORAGE_FS_ROOT, or the receipts named volume when they live in Docker.
 OBJ_OUT="${BACKUP_DIR}/cec_objects_${STAMP}.tar.gz"
-if [ -n "$OBJ_ROOT" ] && [ -d "$OBJ_ROOT" ]; then
-  tar -czf "$OBJ_OUT" -C "$OBJ_ROOT" .
+if cec_objects_archive "$OBJ_OUT"; then
   chmod 600 "$OBJ_OUT"
   maybe_encrypt "$OBJ_OUT"
 else
-  echo "WARNING: object store '$OBJ_ROOT' not found on this host."
-  echo "  If receipts live in the Docker named volume 'objects', archive it with:"
-  echo "    docker run --rm -v cec-inventory_objects:/data -v \"$BACKUP_DIR\":/out alpine \\"
-  echo "      tar -czf /out/cec_objects_${STAMP}.tar.gz -C /data ."
-  echo "  The DB dump alone does NOT protect receipts (scope §7 RMA proof) — do not skip this."
+  echo "WARNING: object store not found (no host STORAGE_FS_ROOT, no '$(cec_objects_volume)'"
+  echo "  volume). The DB dump alone does NOT protect receipts (scope §7 RMA proof)."
 fi
 
 # 3) Retention: prune old backups (both .dump/.tar.gz and their .age variants).

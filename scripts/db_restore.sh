@@ -6,6 +6,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck disable=SC1091
 . ./.env
+# shellcheck disable=SC1091
+. ./scripts/_pglib.sh   # cec_pg_* + cec_objects_* (host pg tools, or the db container if absent)
 
 FILE="${1:-}"
 OBJ_FILE="${2:-}"
@@ -19,17 +21,17 @@ printf "restore %s into %s ? this overwrites current data [y/N] " "$FILE" "$POST
 read -r ans
 [ "$ans" = "y" ] || { echo "aborted"; exit 1; }
 
-pg_restore --clean --if-exists --no-owner --dbname="$DATABASE_URL" "$FILE"
+cec_pg_restore_clean "$DATABASE_URL" "$FILE"
 echo "database restore complete"
 
 # Receipts/photos: restore the paired archive so receipt_files references resolve again.
 if [ -n "$OBJ_FILE" ]; then
   if [ ! -f "$OBJ_FILE" ]; then echo "no such objects archive: $OBJ_FILE"; exit 1; fi
-  OBJ_ROOT="${STORAGE_FS_ROOT:-}"
-  [ -n "$OBJ_ROOT" ] || { echo "STORAGE_FS_ROOT unset; cannot restore objects"; exit 1; }
-  mkdir -p "$OBJ_ROOT"
-  tar -xzf "$OBJ_FILE" -C "$OBJ_ROOT"
-  echo "object store restored into $OBJ_ROOT"
+  if cec_objects_extract "$OBJ_FILE"; then
+    echo "object store restored"
+  else
+    echo "could not restore objects (no host STORAGE_FS_ROOT and no objects volume)"; exit 1
+  fi
 else
   echo "NOTE: no objects archive given — receipts/photos were NOT restored. Pass it as arg 2"
   echo "      or the restored DB will reference receipt files that no longer exist."

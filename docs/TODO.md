@@ -22,8 +22,16 @@ merged to `main`. Do these to close the last sandbox gaps (full steps: `CLAUDE.m
   JSON (vendor/lines/serials/totals), `engine=vlm_openai`, images stay on-box (§11.2). D-020/D-021.
   REMAINING: OpenCV long-receipt `/stitch` (still a placeholder); decide whether to enable the
   keep-warm timer (holds ~21 GB VRAM).
-- [ ] **Stand up scheduled backups:** install `scripts/systemd/cec-backup.{service,timer}`, set
-  `BACKUP_AGE_RECIPIENT` (encryption) + an offsite target; verify with `scripts/restore_drill.sh`.
+- ◐ PARTIAL [2026-06-27] **Backups.** DONE: validated on the box — age-encrypted DB + object-store
+  archives via `db_backup.sh`; **restore drill PASSED** (21 tables) via `restore_drill.sh`; scripts
+  are container-aware (no host pg tools / no sudo needed; `scripts/_pglib.sh`, D-022). Age key at
+  `~/.config/cec/backup-age.key` — **NOT in git; back it up offsite or restores are impossible.**
+  OUTSTANDING: enable the schedule (`scripts/systemd/cec-backup.{service,timer}` — needs sudo) +
+  an offsite replication target.
+- [ ] **[2026-06-27] Enable the receipt-vision keep-warm timer** (implement later): install
+  `scripts/systemd/cec-vlm-keepwarm.{service,timer}` (needs sudo) so `cec-vision-judge` stays
+  resident and operators skip the ~2-3 min cold load. Holds ~21 GB VRAM — enable only when the GPU
+  isn't needed for other CEC tools.
 
 ## Open — close out Phase 0
 
